@@ -1,0 +1,42 @@
+// NetworkTransform.cs
+using UnityEngine;
+
+public class NetworkTransform : MonoBehaviour
+{
+    public int networkId { get; private set; }
+    public bool isLocalPlayer = true; // Set this to false for remote players/objects
+
+    private Vector3 targetPosition;
+    private Quaternion targetRotation;
+
+    void Awake()
+    {
+        targetPosition = transform.position;
+        targetRotation = transform.rotation;
+    }
+
+    void Start()
+    {
+        NetworkManager.Instance.RegisterTransform(this);
+    }
+
+    void Update()
+    {
+        if (!isLocalPlayer)
+        {
+            transform.position = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * 10);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 10);
+        }
+    }
+
+    public void SetNetworkId(int id)
+    {
+        networkId = id;
+    }
+
+    public void UpdateTransform(Vector3 position, Quaternion rotation)
+    {
+        targetPosition = position;
+        targetRotation = rotation;
+    }
+}
