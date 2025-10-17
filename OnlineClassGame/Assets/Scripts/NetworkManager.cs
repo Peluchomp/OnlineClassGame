@@ -40,7 +40,8 @@ public class NetworkManager : MonoBehaviour
 
     public void RegisterTransform(NetworkTransform transform) 
     {  
-        registeredTransforms.Add(transform); 
+        registeredTransforms.Add(transform);
+        transform.SetNetworkId(registeredTransforms.Count - 1);
     }
 
     void Start()
