@@ -9,6 +9,9 @@ public class NetworkTransform : MonoBehaviour
     private Vector3 targetPosition;
     private Quaternion targetRotation;
 
+    public Vector3 netwPos;
+    private Quaternion netwRot;
+
     void Awake()
     {
         targetPosition = transform.position;
@@ -26,6 +29,12 @@ public class NetworkTransform : MonoBehaviour
         {
             transform.position = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * 10);
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 10);
+        }
+
+        if (isLocalPlayer)
+        {
+            netwPos = transform.position;
+            netwRot = transform.rotation;
         }
     }
 
