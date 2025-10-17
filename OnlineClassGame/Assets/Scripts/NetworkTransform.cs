@@ -10,7 +10,7 @@ public class NetworkTransform : MonoBehaviour
     private Quaternion targetRotation;
 
     public Vector3 netwPos;
-    private Quaternion netwRot;
+    public Quaternion netwRot;
 
     void Awake()
     {
@@ -45,7 +45,11 @@ public class NetworkTransform : MonoBehaviour
 
     public void UpdateTransform(Vector3 position, Quaternion rotation)
     {
+        netwPos = position;
+        netwRot = rotation;
+        // Aplica directamente a la posición y rotación del objeto
         targetPosition = position;
         targetRotation = rotation;
+        Debug.Log("Im didac and im a nerd im updating transform");
     }
 }
