@@ -5,15 +5,14 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using UnityEngine;
-using static UnityEditor.PlayerSettings;
-using static UnityEngine.Rendering.DebugUI.Table;
+using System.IO;
 
 public class NetworkManager : MonoBehaviour
 {
     public enum NetworkRole { Server, Client, Host }
     public NetworkRole role = NetworkRole.Host;
 
-    public static NetworkManager Instance; 
+    public static NetworkManager Instance;
 
     public int port = 9050;
     public string serverAddress = "127.0.0.1";
@@ -38,8 +37,8 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
-    public void RegisterTransform(NetworkTransform transform) 
-    {  
+    public void RegisterTransform(NetworkTransform transform)
+    {
         registeredTransforms.Add(transform);
         transform.SetNetworkId(registeredTransforms.Count - 1);
     }
@@ -75,56 +74,78 @@ public class NetworkManager : MonoBehaviour
         socket?.Close();
     }
 
-    private string SerializeTransforms()
+    private byte[] SerializeTransformsBinary()
     {
-        StringBuilder sb = new StringBuilder();
+        MemoryStream memoryStream = new MemoryStream();
+
+        BinaryWriter writer = new BinaryWriter(memoryStream);
+           
         foreach (var t in registeredTransforms)
         {
-            sb.Append($"{t.networkId}|{t.netwPos.x:F2}.{t.netwPos.y:F2}.{t.netwPos.z:F2}|{t.netwRot.x:F2}.{t.netwRot.y:F2}.{t.netwRot.z:F2}.{t.netwRot.w:F2};");
-        }
+            writer.Write(t.networkId);
 
-        Debug.Log("Serialized transforms: " + sb.ToString());
-        return sb.ToString();
+            writer.Write(t.netwPos.x);
+            writer.Write(t.netwPos.y);
+            writer.Write(t.netwPos.z);
+
+            writer.Write(t.netwRot.x);
+            writer.Write(t.netwRot.y);
+            writer.Write(t.netwRot.z);
+            writer.Write(t.netwRot.w);
+
+            writer.Write(t.netwScale.x);
+            writer.Write(t.netwScale.y);
+            writer.Write(t.netwScale.z);
+        }
+           
+        return memoryStream.ToArray();
     }
 
-    // Deserializa y actualiza los NetworkTransform registrados
-    private void DeserializeAndApply(string data)
+    private void DeserializeAndApplyBinary(byte[] data, int length)
     {
-
-        var entries = data.Split(';');
-        foreach (var entry in entries)
+        try
         {
-            if (string.IsNullOrWhiteSpace(entry)) continue;
-            var parts = entry.Split('|');
-            if (parts.Length != 3) continue;
+            MemoryStream memoryStream = new MemoryStream(data, 0, length);
 
-            int id;
-            if (!int.TryParse(parts[0], out id)) continue;
-
-            var posParts = parts[1].Split('.');
-            var rotParts = parts[2].Split('.');
-
-            if (posParts.Length != 3 || rotParts.Length != 4) continue;
-
-            Vector3 pos = new Vector3(
-                float.Parse(posParts[0]),
-                float.Parse(posParts[1]),
-                float.Parse(posParts[2])
-            );
-            Quaternion rot = new Quaternion(
-                float.Parse(rotParts[0]),
-                float.Parse(rotParts[1]),
-                float.Parse(rotParts[2]),
-                float.Parse(rotParts[3])
-            );
-
-            Debug.Log($"Updating transform with string: " + pos);
-
-            var t = registeredTransforms.Find(x => x.networkId == id);
-            if (t != null && !t.isLocalPlayer)
+            BinaryReader reader = new BinaryReader(memoryStream);
+                
+            while (reader.BaseStream.Position < reader.BaseStream.Length)
             {
-                t.UpdateTransform(pos, rot);
+                int id = reader.ReadInt32();
+
+                Vector3 pos = new Vector3(
+                    reader.ReadSingle(),
+                    reader.ReadSingle(),
+                    reader.ReadSingle()
+                );
+
+                Quaternion rot = new Quaternion(
+                    reader.ReadSingle(),
+                    reader.ReadSingle(),
+                    reader.ReadSingle(),
+                    reader.ReadSingle()
+                );
+
+                Vector3 scale = new Vector3(
+                    reader.ReadSingle(),
+                    reader.ReadSingle(),
+                    reader.ReadSingle()
+                );
+
+                var t = registeredTransforms.Find(x => x.networkId == id);
+                if (t != null && !t.isLocalPlayer)
+                {
+                    t.UpdateTransform(pos, rot, scale);
+                }
             }
+        }
+        catch (System.IO.EndOfStreamException)
+        {
+            Debug.LogWarning("Received malformed packet (EndOfStreamException).");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Error deserializing data: {e.Message}");
         }
     }
 
@@ -135,9 +156,9 @@ public class NetworkManager : MonoBehaviour
         IPEndPoint ipep = new IPEndPoint(IPAddress.Any, port);
         serverSocket.Bind(ipep);
 
-        byte[] buffer = new byte[1024];
+        byte[] buffer = new byte[2048];
 
-        Debug.Log("Servidor UDP iniciado en el puerto " + port);
+        Debug.Log("Servidor UDP (Binario) iniciado en el puerto " + port);
 
         while (!m_cancel)
         {
@@ -148,21 +169,16 @@ public class NetworkManager : MonoBehaviour
                 receivedBytes = serverSocket.ReceiveFrom(buffer, ref sender);
             }
             catch (SocketException) { break; }
+
             if (receivedBytes > 0)
             {
-                string msg = Encoding.UTF8.GetString(buffer, 0, receivedBytes);
-            //    Debug.Log($"[Servidor] Recibido de {sender}: {msg}");
+                DeserializeAndApplyBinary(buffer, receivedBytes);
 
-                // Actualiza las posiciones recibidas
-                DeserializeAndApply(msg);
-                
-                // Envía las posiciones actuales de todos los objetos
-                string transformsData = SerializeTransforms();
-                byte[] response = Encoding.UTF8.GetBytes(transformsData);
-                Debug.Log($"[Server] Sending {sender}: {transformsData}");
+                byte[] response = SerializeTransformsBinary();
+
                 serverSocket.SendTo(response, sender);
             }
-            Thread.Sleep(10);
+            Thread.Sleep(33);
         }
         serverSocket.Close();
     }
@@ -172,18 +188,14 @@ public class NetworkManager : MonoBehaviour
         Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
 
-        // Enviar primer mensaje
         clientSocket.SendTo(Encoding.UTF8.GetBytes("Hola desde el cliente"), serverEp);
 
-        byte[] buffer = new byte[1024];
-
-        Debug.Log("Cliente UDP iniciado, enviando a " + serverAddress + ":" + port);
+        byte[] buffer = new byte[2048];
 
         while (!m_cancel)
         {
-            // Envía las posiciones actuales de los objetos locales
-            string transformsData = SerializeTransforms();
-            clientSocket.SendTo(Encoding.UTF8.GetBytes(transformsData), serverEp);
+            byte[] transformsData = SerializeTransformsBinary();
+            clientSocket.SendTo(transformsData, serverEp);
 
             EndPoint sender = new IPEndPoint(IPAddress.Any, 0);
             int receivedBytes = 0;
@@ -192,15 +204,12 @@ public class NetworkManager : MonoBehaviour
                 receivedBytes = clientSocket.ReceiveFrom(buffer, ref sender);
             }
             catch (SocketException) { break; }
+
             if (receivedBytes > 0)
             {
-                string msg = Encoding.UTF8.GetString(buffer, 0, receivedBytes);
-              //  Debug.Log($"[Cliente] Recibido de {sender}: {msg}");
-
-                // Actualiza las posiciones recibidas
-                DeserializeAndApply(msg);
+                DeserializeAndApplyBinary(buffer, receivedBytes);
             }
-            Thread.Sleep(10);
+            Thread.Sleep(33);
         }
         clientSocket.Close();
     }
