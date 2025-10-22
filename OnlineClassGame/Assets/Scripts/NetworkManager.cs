@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using UnityEngine;
 using System.IO;
+using System.Runtime.Serialization.Formatters.Binary;
 
 public class NetworkManager : MonoBehaviour
 {
@@ -23,6 +24,24 @@ public class NetworkManager : MonoBehaviour
     private Thread serverThread;
     private Thread clientThread;
     private volatile bool m_cancel = false;
+
+    struct NetworkTransformData
+    {
+        public int networkId;
+
+        public float netPositionX;
+        public float netPositionY;
+        public float netPositionZ;
+
+        public float netRotationX;
+        public float netRotationY;
+        public float netRotationZ;
+        public float netRotationW;
+
+        public float netScaleX;
+        public float netScaleY;
+        public float netScaleZ;
+    }
 
     private void Awake()
     {
@@ -76,28 +95,29 @@ public class NetworkManager : MonoBehaviour
 
     private byte[] SerializeTransformsBinary()
     {
-        MemoryStream memoryStream = new MemoryStream();
-
-        BinaryWriter writer = new BinaryWriter(memoryStream);
-           
+        List<NetworkTransformData> dataList = new List<NetworkTransformData>();
         foreach (var t in registeredTransforms)
         {
-            writer.Write(t.networkId);
-
-            writer.Write(t.netwPos.x);
-            writer.Write(t.netwPos.y);
-            writer.Write(t.netwPos.z);
-
-            writer.Write(t.netwRot.x);
-            writer.Write(t.netwRot.y);
-            writer.Write(t.netwRot.z);
-            writer.Write(t.netwRot.w);
-
-            writer.Write(t.netwScale.x);
-            writer.Write(t.netwScale.y);
-            writer.Write(t.netwScale.z);
+            dataList.Add(new NetworkTransformData
+            {
+                networkId = t.networkId,
+                netPositionX = t.netwPos.x,
+                netPositionY = t.netwPos.y,
+                netPositionZ = t.netwPos.z,
+                netRotationX = t.netwRot.x,
+                netRotationY = t.netwRot.y,
+                netRotationZ = t.netwRot.z,
+                netRotationW = t.netwRot.w,
+                netScaleX = t.netwScale.x,
+                netScaleY = t.netwScale.y,
+                netScaleZ = t.netwScale.z
+            });
         }
-           
+
+        MemoryStream memoryStream = new MemoryStream();
+
+        BinaryFormatter binaryFormatter = new BinaryFormatter();
+        binaryFormatter.Serialize(memoryStream, dataList);
         return memoryStream.ToArray();
     }
 
@@ -107,45 +127,26 @@ public class NetworkManager : MonoBehaviour
         {
             MemoryStream memoryStream = new MemoryStream(data, 0, length);
 
-            BinaryReader reader = new BinaryReader(memoryStream);
-                
-            while (reader.BaseStream.Position < reader.BaseStream.Length)
+            BinaryFormatter binaryFormatter = new BinaryFormatter();
+            var dataList = (List<NetworkTransformData>)binaryFormatter.Deserialize(memoryStream);
+
+            foreach (var item in dataList)
             {
-                int id = reader.ReadInt32();
-
-                Vector3 pos = new Vector3(
-                    reader.ReadSingle(),
-                    reader.ReadSingle(),
-                    reader.ReadSingle()
-                );
-
-                Quaternion rot = new Quaternion(
-                    reader.ReadSingle(),
-                    reader.ReadSingle(),
-                    reader.ReadSingle(),
-                    reader.ReadSingle()
-                );
-
-                Vector3 scale = new Vector3(
-                    reader.ReadSingle(),
-                    reader.ReadSingle(),
-                    reader.ReadSingle()
-                );
-
-                var t = registeredTransforms.Find(x => x.networkId == id);
+                var t = registeredTransforms.Find(x => x.networkId == item.networkId);
                 if (t != null && !t.isLocalPlayer)
                 {
-                    t.UpdateTransform(pos, rot, scale);
+                    t.UpdateTransform(
+                        new Vector3(item.netPositionX, item.netPositionY, item.netPositionZ),
+                        new Quaternion(item.netRotationX, item.netRotationY, item.netRotationZ, item.netRotationW),
+                        new Vector3(item.netScaleX, item.netScaleY, item.netScaleZ)
+                    );
                 }
             }
-        }
-        catch (System.IO.EndOfStreamException)
-        {
-            Debug.LogWarning("Received malformed packet (EndOfStreamException).");
+
         }
         catch (System.Exception e)
         {
-            Debug.LogError($"Error deserializing data: {e.Message}");
+            Debug.LogError($"Error deserializando datos: {e.Message}");
         }
     }
 
@@ -172,11 +173,17 @@ public class NetworkManager : MonoBehaviour
 
             if (receivedBytes > 0)
             {
-                DeserializeAndApplyBinary(buffer, receivedBytes);
+                if (buffer[0] < 32 || buffer[0] > 126)
+                {
+                    DeserializeAndApplyBinary(buffer, receivedBytes);
 
-                byte[] response = SerializeTransformsBinary();
-
-                serverSocket.SendTo(response, sender);
+                    byte[] response = SerializeTransformsBinary();
+                    serverSocket.SendTo(response, sender);
+                }
+                else
+                {
+                    Debug.Log("Mensaje de texto recibido, ignorado.");
+                }
             }
             Thread.Sleep(33);
         }
