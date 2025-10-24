@@ -95,54 +95,72 @@ public class NetworkManager : MonoBehaviour
 
     private byte[] SerializeTransformsBinary()
     {
-        List<NetworkTransformData> dataList = new List<NetworkTransformData>();
+        var ids = new List<int>();
+        var floats = new List<float>();
+
         foreach (var t in registeredTransforms)
         {
-            dataList.Add(new NetworkTransformData
-            {
-                networkId = t.networkId,
-                netPositionX = t.netwPos.x,
-                netPositionY = t.netwPos.y,
-                netPositionZ = t.netwPos.z,
-                netRotationX = t.netwRot.x,
-                netRotationY = t.netwRot.y,
-                netRotationZ = t.netwRot.z,
-                netRotationW = t.netwRot.w,
-                netScaleX = t.netwScale.x,
-                netScaleY = t.netwScale.y,
-                netScaleZ = t.netwScale.z
-            });
+            ids.Add(t.networkId);
+            floats.Add(t.netwPos.x);
+            floats.Add(t.netwPos.y);
+            floats.Add(t.netwPos.z);
+            floats.Add(t.netwRot.x);
+            floats.Add(t.netwRot.y);
+            floats.Add(t.netwRot.z);
+            floats.Add(t.netwRot.w);
+            floats.Add(t.netwScale.x);
+            floats.Add(t.netwScale.y);
+            floats.Add(t.netwScale.z);
         }
 
-        MemoryStream memoryStream = new MemoryStream();
+        var data = new object[] { ids, floats };
 
-        BinaryFormatter binaryFormatter = new BinaryFormatter();
-        binaryFormatter.Serialize(memoryStream, dataList);
-        return memoryStream.ToArray();
+        using (var memoryStream = new MemoryStream())
+        {
+            var binaryFormatter = new BinaryFormatter();
+            binaryFormatter.Serialize(memoryStream, data);
+            return memoryStream.ToArray();
+        }
     }
 
     private void DeserializeAndApplyBinary(byte[] data, int length)
     {
         try
         {
-            MemoryStream memoryStream = new MemoryStream(data, 0, length);
-
-            BinaryFormatter binaryFormatter = new BinaryFormatter();
-            var dataList = (List<NetworkTransformData>)binaryFormatter.Deserialize(memoryStream);
-
-            foreach (var item in dataList)
+            using (var memoryStream = new MemoryStream(data, 0, length))
             {
-                var t = registeredTransforms.Find(x => x.networkId == item.networkId);
-                if (t != null && !t.isLocalPlayer)
+                var binaryFormatter = new BinaryFormatter();
+                var obj = (object[])binaryFormatter.Deserialize(memoryStream);
+
+                var ids = (List<int>)obj[0];
+                var floats = (List<float>)obj[1];
+
+                int idx = 0;
+                for (int i = 0; i < ids.Count; i++)
                 {
-                    t.UpdateTransform(
-                        new Vector3(item.netPositionX, item.netPositionY, item.netPositionZ),
-                        new Quaternion(item.netRotationX, item.netRotationY, item.netRotationZ, item.netRotationW),
-                        new Vector3(item.netScaleX, item.netScaleY, item.netScaleZ)
-                    );
+                    int networkId = ids[i];
+                    float posX = floats[idx++];
+                    float posY = floats[idx++];
+                    float posZ = floats[idx++];
+                    float rotX = floats[idx++];
+                    float rotY = floats[idx++];
+                    float rotZ = floats[idx++];
+                    float rotW = floats[idx++];
+                    float scaleX = floats[idx++];
+                    float scaleY = floats[idx++];
+                    float scaleZ = floats[idx++];
+
+                    var t = registeredTransforms.Find(x => x.networkId == networkId);
+                    if (t != null && !t.isLocalPlayer)
+                    {
+                        t.UpdateTransform(
+                            new Vector3(posX, posY, posZ),
+                            new Quaternion(rotX, rotY, rotZ, rotW),
+                            new Vector3(scaleX, scaleY, scaleZ)
+                        );
+                    }
                 }
             }
-
         }
         catch (System.Exception e)
         {
@@ -173,17 +191,10 @@ public class NetworkManager : MonoBehaviour
 
             if (receivedBytes > 0)
             {
-                if (buffer[0] < 32 || buffer[0] > 126)
-                {
-                    DeserializeAndApplyBinary(buffer, receivedBytes);
+                DeserializeAndApplyBinary(buffer, receivedBytes);
 
-                    byte[] response = SerializeTransformsBinary();
-                    serverSocket.SendTo(response, sender);
-                }
-                else
-                {
-                    Debug.Log("Mensaje de texto recibido, ignorado.");
-                }
+                byte[] response = SerializeTransformsBinary();
+                serverSocket.SendTo(response, sender);
             }
             Thread.Sleep(33);
         }
@@ -194,8 +205,6 @@ public class NetworkManager : MonoBehaviour
     {
         Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
-
-        clientSocket.SendTo(Encoding.UTF8.GetBytes("Hola desde el cliente"), serverEp);
 
         byte[] buffer = new byte[2048];
 
