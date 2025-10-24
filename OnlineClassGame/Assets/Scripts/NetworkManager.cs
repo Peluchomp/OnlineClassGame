@@ -127,40 +127,40 @@ public class NetworkManager : MonoBehaviour
     {
         try
         {
-            using (var memoryStream = new MemoryStream(data, 0, length))
+            var memoryStream = new MemoryStream(data, 0, length);
+            
+            var binaryFormatter = new BinaryFormatter();
+            var obj = (object[])binaryFormatter.Deserialize(memoryStream);
+
+            var ids = (List<int>)obj[0];
+            var floats = (List<float>)obj[1];
+
+            int idx = 0;
+            for (int i = 0; i < ids.Count; i++)
             {
-                var binaryFormatter = new BinaryFormatter();
-                var obj = (object[])binaryFormatter.Deserialize(memoryStream);
+                int networkId = ids[i];
+                float posX = floats[idx++];
+                float posY = floats[idx++];
+                float posZ = floats[idx++];
+                float rotX = floats[idx++];
+                float rotY = floats[idx++];
+                float rotZ = floats[idx++];
+                float rotW = floats[idx++];
+                float scaleX = floats[idx++];
+                float scaleY = floats[idx++];
+                float scaleZ = floats[idx++];
 
-                var ids = (List<int>)obj[0];
-                var floats = (List<float>)obj[1];
-
-                int idx = 0;
-                for (int i = 0; i < ids.Count; i++)
+                var t = registeredTransforms.Find(x => x.networkId == networkId);
+                if (t != null && !t.isLocalPlayer)
                 {
-                    int networkId = ids[i];
-                    float posX = floats[idx++];
-                    float posY = floats[idx++];
-                    float posZ = floats[idx++];
-                    float rotX = floats[idx++];
-                    float rotY = floats[idx++];
-                    float rotZ = floats[idx++];
-                    float rotW = floats[idx++];
-                    float scaleX = floats[idx++];
-                    float scaleY = floats[idx++];
-                    float scaleZ = floats[idx++];
-
-                    var t = registeredTransforms.Find(x => x.networkId == networkId);
-                    if (t != null && !t.isLocalPlayer)
-                    {
-                        t.UpdateTransform(
-                            new Vector3(posX, posY, posZ),
-                            new Quaternion(rotX, rotY, rotZ, rotW),
-                            new Vector3(scaleX, scaleY, scaleZ)
-                        );
-                    }
+                    t.UpdateTransform(
+                        new Vector3(posX, posY, posZ),
+                        new Quaternion(rotX, rotY, rotZ, rotW),
+                        new Vector3(scaleX, scaleY, scaleZ)
+                    );
                 }
             }
+        
         }
         catch (System.Exception e)
         {

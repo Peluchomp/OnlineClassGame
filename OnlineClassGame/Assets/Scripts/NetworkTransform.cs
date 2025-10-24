@@ -60,6 +60,8 @@ public class NetworkTransform : MonoBehaviour
 
     public void UpdateTransform(Vector3 position, Quaternion rotation, Vector3 scale)
     {
+        if (isLocalPlayer) return;
+
         netwPos = position;
         netwRot = rotation;
         netwScale = scale;
