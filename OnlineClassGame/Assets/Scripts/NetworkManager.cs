@@ -18,30 +18,17 @@ public class NetworkManager : MonoBehaviour
     public int port = 9050;
     public string serverAddress = "127.0.0.1";
 
-    List<NetworkTransform> registeredTransforms = new List<NetworkTransform>();
+    // Use Dictionaries for fast ID-based lookup.
+    Dictionary<int, NetworkIdentity> networkIdentities = new Dictionary<int, NetworkIdentity>();
+    Dictionary<string, NetworkIdentity> sceneIdentities = new Dictionary<string, NetworkIdentity>();
+    private int nextNetworkId = 1; // 0 can be reserved for "unassigned"
 
     private Socket socket;
     private Thread serverThread;
     private Thread clientThread;
     private volatile bool m_cancel = false;
 
-    struct NetworkTransformData
-    {
-        public int networkId;
-
-        public float netPositionX;
-        public float netPositionY;
-        public float netPositionZ;
-
-        public float netRotationX;
-        public float netRotationY;
-        public float netRotationZ;
-        public float netRotationW;
-
-        public float netScaleX;
-        public float netScaleY;
-        public float netScaleZ;
-    }
+    // NetworkTransformData struct is no longer needed.
 
     private void Awake()
     {
@@ -56,10 +43,32 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
-    public void RegisterTransform(NetworkTransform transform)
+    public void RegisterIdentity(NetworkIdentity identity)
     {
-        registeredTransforms.Add(transform);
-        transform.SetNetworkId(registeredTransforms.Count - 1);
+        if (identity == null) return;
+
+        if (!string.IsNullOrEmpty(identity.sceneId))
+        {
+            if (sceneIdentities.ContainsKey(identity.sceneId))
+            {
+                Debug.LogError($"SceneId '{identity.sceneId}' is duplicated. SceneIds must be unique.");
+                return;
+            }
+            sceneIdentities[identity.sceneId] = identity;
+
+            if (role == NetworkRole.Server || role == NetworkRole.Host)
+            {
+                int newId = nextNetworkId++;
+                identity.SetNetworkId(newId);
+                identity.SetIsLocalPlayer(true);
+                networkIdentities[newId] = identity;
+
+            }
+        }
+        else
+        {
+           //Spawn logic?
+        }
     }
 
     void Start()
@@ -98,22 +107,38 @@ public class NetworkManager : MonoBehaviour
         var ids = new List<int>();
         var floats = new List<float>();
 
-        foreach (var t in registeredTransforms)
+        var sceneSyncs = new List<object[]>();
+
+
+        foreach (var kvp in sceneIdentities)
         {
-            ids.Add(t.networkId);
-            floats.Add(t.netwPos.x);
-            floats.Add(t.netwPos.y);
-            floats.Add(t.netwPos.z);
-            floats.Add(t.netwRot.x);
-            floats.Add(t.netwRot.y);
-            floats.Add(t.netwRot.z);
-            floats.Add(t.netwRot.w);
-            floats.Add(t.netwScale.x);
-            floats.Add(t.netwScale.y);
-            floats.Add(t.netwScale.z);
+            if (kvp.Value.networkId != 0) 
+            {
+                sceneSyncs.Add(new object[] { kvp.Key, kvp.Value.networkId });
+            }
+               
         }
 
-        var data = new object[] { ids, floats };
+        foreach (var identity in networkIdentities.Values)
+        {
+            var t = identity.NetworkTransform;
+            if (t != null)
+            {
+                ids.Add(identity.networkId);
+                floats.Add(t.netwPos.x);
+                floats.Add(t.netwPos.y);
+                floats.Add(t.netwPos.z);
+                floats.Add(t.netwRot.x);
+                floats.Add(t.netwRot.y);
+                floats.Add(t.netwRot.z);
+                floats.Add(t.netwRot.w);
+                floats.Add(t.netwScale.x);
+                floats.Add(t.netwScale.y);
+                floats.Add(t.netwScale.z);
+            }
+        }
+
+        var data = new object[] { sceneSyncs, ids, floats };
 
         using (var memoryStream = new MemoryStream())
         {
@@ -128,17 +153,32 @@ public class NetworkManager : MonoBehaviour
         try
         {
             var memoryStream = new MemoryStream(data, 0, length);
-            
+
             var binaryFormatter = new BinaryFormatter();
             var obj = (object[])binaryFormatter.Deserialize(memoryStream);
 
-            var ids = (List<int>)obj[0];
-            var floats = (List<float>)obj[1];
+            var sceneSyncs = (List<object[]>)obj[0];
+            var ids = (List<int>)obj[1];
+            var floats = (List<float>)obj[2];
+
+            foreach (var syncData in sceneSyncs)
+            {
+                string sceneId = (string)syncData[0];
+                int networkId = (int)syncData[1];
+
+                NetworkIdentity identity;
+                if (sceneIdentities.TryGetValue(sceneId, out identity) && identity.networkId == 0)
+                {
+                    identity.SetNetworkId(networkId);
+                    networkIdentities[networkId] = identity;
+                }
+            }
 
             int idx = 0;
             for (int i = 0; i < ids.Count; i++)
             {
                 int networkId = ids[i];
+
                 float posX = floats[idx++];
                 float posY = floats[idx++];
                 float posZ = floats[idx++];
@@ -150,17 +190,21 @@ public class NetworkManager : MonoBehaviour
                 float scaleY = floats[idx++];
                 float scaleZ = floats[idx++];
 
-                var t = registeredTransforms.Find(x => x.networkId == networkId);
-                if (t != null && !t.isLocalPlayer)
+                NetworkIdentity identity;
+                if (networkIdentities.TryGetValue(networkId, out identity) && !identity.isLocalPlayer)
                 {
-                    t.UpdateTransform(
-                        new Vector3(posX, posY, posZ),
-                        new Quaternion(rotX, rotY, rotZ, rotW),
-                        new Vector3(scaleX, scaleY, scaleZ)
-                    );
+                    var t = identity.NetworkTransform;
+                    if (t != null)
+                    {
+                        t.UpdateTransform(
+                            new Vector3(posX, posY, posZ),
+                            new Quaternion(rotX, rotY, rotZ, rotW),
+                            new Vector3(scaleX, scaleY, scaleZ)
+                        );
+                    }
                 }
             }
-        
+
         }
         catch (System.Exception e)
         {
@@ -176,8 +220,9 @@ public class NetworkManager : MonoBehaviour
         serverSocket.Bind(ipep);
 
         byte[] buffer = new byte[2048];
-
         Debug.Log("Servidor UDP (Binario) iniciado en el puerto " + port);
+
+        var clientEndpoints = new HashSet<EndPoint>();
 
         while (!m_cancel)
         {
@@ -185,18 +230,35 @@ public class NetworkManager : MonoBehaviour
             int receivedBytes = 0;
             try
             {
-                receivedBytes = serverSocket.ReceiveFrom(buffer, ref sender);
+                if (serverSocket.Available == 0)
+                {
+                    Thread.Sleep(1);
+                }
+                else
+                {
+                    receivedBytes = serverSocket.ReceiveFrom(buffer, ref sender);
+                }
             }
             catch (SocketException) { break; }
 
             if (receivedBytes > 0)
             {
-                DeserializeAndApplyBinary(buffer, receivedBytes);
+                if (!clientEndpoints.Contains(sender))
+                {
+                    clientEndpoints.Add(sender);
+                    Debug.Log("Nuevo cliente conectado: " + sender.ToString());
+                }
 
-                byte[] response = SerializeTransformsBinary();
-                serverSocket.SendTo(response, sender);
+                 DeserializeAndApplyBinary(buffer, receivedBytes); 
             }
-            Thread.Sleep(33);
+
+            byte[] response = SerializeTransformsBinary();
+            foreach (var ep in clientEndpoints)
+            {
+                serverSocket.SendTo(response, ep);
+            }
+
+            Thread.Sleep(33); // 30 FPS
         }
         serverSocket.Close();
     }

@@ -1,9 +1,9 @@
 using UnityEngine;
 
+[RequireComponent(typeof(NetworkIdentity))]
 public class NetworkTransform : MonoBehaviour
 {
-    public int networkId { get; private set; }
-    public bool isLocalPlayer = true;
+    NetworkIdentity networkIdentity;
 
     private Vector3 targetPosition;
     private Quaternion targetRotation;
@@ -16,6 +16,8 @@ public class NetworkTransform : MonoBehaviour
 
     void Awake()
     {
+        networkIdentity = GetComponent<NetworkIdentity>();
+
         targetPosition = transform.position;
         targetRotation = transform.rotation;
         targetScale = transform.localScale;
@@ -25,25 +27,15 @@ public class NetworkTransform : MonoBehaviour
         netwScale = transform.localScale;
     }
 
-    void Start()
-    {
-        if (NetworkManager.Instance != null)
-        {
-            NetworkManager.Instance.RegisterTransform(this);
-        }
-        else
-        {
-            Debug.LogError("NetworkManager.Instance is null. Cannot register NetworkTransform.");
-        }
-    }
+    // Start() method (and registration) is removed.
 
     void Update()
     {
-        if (!isLocalPlayer)
+        if (!networkIdentity.isLocalPlayer)
         {
             transform.position = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * 10);
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 10);
-            transform.localScale = Vector3.Lerp(transform.localScale, targetScale, Time.deltaTime * 10); 
+            transform.localScale = Vector3.Lerp(transform.localScale, targetScale, Time.deltaTime * 10);
         }
         else
         {
@@ -53,14 +45,9 @@ public class NetworkTransform : MonoBehaviour
         }
     }
 
-    public void SetNetworkId(int id)
-    {
-        networkId = id;
-    }
-
     public void UpdateTransform(Vector3 position, Quaternion rotation, Vector3 scale)
     {
-        if (isLocalPlayer) return;
+        if (networkIdentity.isLocalPlayer) return;
 
         netwPos = position;
         netwRot = rotation;
@@ -69,6 +56,5 @@ public class NetworkTransform : MonoBehaviour
         targetPosition = position;
         targetRotation = rotation;
         targetScale = scale;
-
     }
 }
