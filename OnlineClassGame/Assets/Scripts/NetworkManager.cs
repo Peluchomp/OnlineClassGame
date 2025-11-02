@@ -18,17 +18,14 @@ public class NetworkManager : MonoBehaviour
     public int port = 9050;
     public string serverAddress = "127.0.0.1";
 
-    // Use Dictionaries for fast ID-based lookup.
     Dictionary<int, NetworkIdentity> networkIdentities = new Dictionary<int, NetworkIdentity>();
     Dictionary<string, NetworkIdentity> sceneIdentities = new Dictionary<string, NetworkIdentity>();
-    private int nextNetworkId = 1; // 0 can be reserved for "unassigned"
+    private int nextNetworkId = 1;
 
     private Socket socket;
     private Thread serverThread;
     private Thread clientThread;
     private volatile bool m_cancel = false;
-
-    // NetworkTransformData struct is no longer needed.
 
     private void Awake()
     {

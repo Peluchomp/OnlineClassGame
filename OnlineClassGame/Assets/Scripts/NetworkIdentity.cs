@@ -3,7 +3,10 @@ using UnityEngine;
 
 public class NetworkIdentity : MonoBehaviour
 {
-    public string sceneId;
+    [SerializeField]
+    private string m_sceneId; 
+
+    public string sceneId => m_sceneId;
 
     public int networkId;
     public bool isLocalPlayer;

@@ -207,6 +207,52 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &711568572
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 711568574}
+  - component: {fileID: 711568573}
+  m_Layer: 0
+  m_Name: BurstCollisionWorld
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &711568573
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 711568572}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f1a161c4294214a4fbcb7e9e94800494, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Obi::Obi.BurstColliderWorld
+  cellSpans:
+    m_AlignBytes: 16
+--- !u!4 &711568574
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 711568572}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1232919434
 GameObject:
   m_ObjectHideFlags: 0
@@ -346,7 +392,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fe24e9f013d87f84b99dc151d79d81f7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NetworkTransform
-  isLocalPlayer: 1
   netwPos: {x: 0, y: 0, z: 0}
   netwRot: {x: 0, y: 0, z: 0, w: 0}
   netwScale: {x: 0, y: 0, z: 0}
@@ -472,7 +517,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a6ed7308ec0dd1f479f21d334263645d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NetworkIdentity
-  sceneId: 
+  m_sceneId: 4c53946a-eebb-4c98-8fa9-ccdbc92a21ac
+  networkId: 0
+  isLocalPlayer: 1
 --- !u!1 &1529183670
 GameObject:
   m_ObjectHideFlags: 0
@@ -600,52 +647,6 @@ MonoBehaviour:
   m_ShadowLayerMask: 1
   m_RenderingLayers: 1
   m_ShadowRenderingLayers: 1
---- !u!1 &1674309866
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1674309868}
-  - component: {fileID: 1674309867}
-  m_Layer: 0
-  m_Name: BurstCollisionWorld
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1674309867
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1674309866}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f1a161c4294214a4fbcb7e9e94800494, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Obi::Obi.BurstColliderWorld
-  cellSpans:
-    m_AlignBytes: 16
---- !u!4 &1674309868
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1674309866}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1798132847
 GameObject:
   m_ObjectHideFlags: 0
@@ -1273,7 +1274,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fe24e9f013d87f84b99dc151d79d81f7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NetworkTransform
-  isLocalPlayer: 1
   netwPos: {x: 0, y: 0, z: 0}
   netwRot: {x: 0, y: 0, z: 0, w: 0}
   netwScale: {x: 0, y: 0, z: 0}
@@ -1301,7 +1301,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a6ed7308ec0dd1f479f21d334263645d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NetworkIdentity
-  sceneId: 
+  m_sceneId: 75a1f7cd-5da6-4db1-8f20-a4ccee58f1c4
+  networkId: 0
+  isLocalPlayer: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -1314,4 +1316,4 @@ SceneRoots:
   - {fileID: 2096090518}
   - {fileID: 1524707532}
   - {fileID: 1887661632}
-  - {fileID: 1674309868}
+  - {fileID: 711568574}
