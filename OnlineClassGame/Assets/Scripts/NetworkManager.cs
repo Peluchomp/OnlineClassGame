@@ -83,9 +83,10 @@ public class NetworkManager : MonoBehaviour
         else if (role == NetworkRole.Host)
         {
             serverThread = new Thread(ServerProcess);
-            clientThread = new Thread(ClientProcess);
+         //    clientThread = new Thread(ClientProcess);
             serverThread.Start();
-            clientThread.Start();
+         //   clientThread.Start();
+         // If you start both threads it doesnt work well but this work for now
         }
     }
 
@@ -109,7 +110,7 @@ public class NetworkManager : MonoBehaviour
 
         foreach (var kvp in sceneIdentities)
         {
-            if (kvp.Value.networkId != 0) 
+            if (kvp.Value.networkId != 0 && kvp.Value.isLocalPlayer) 
             {
                 sceneSyncs.Add(new object[] { kvp.Key, kvp.Value.networkId });
             }
@@ -119,7 +120,7 @@ public class NetworkManager : MonoBehaviour
         foreach (var identity in networkIdentities.Values)
         {
             var t = identity.NetworkTransform;
-            if (t != null)
+            if (t != null && identity.isLocalPlayer)
             {
                 ids.Add(identity.networkId);
                 floats.Add(t.netwPos.x);

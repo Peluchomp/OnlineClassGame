@@ -27,8 +27,6 @@ public class NetworkTransform : MonoBehaviour
         netwScale = transform.localScale;
     }
 
-    // Start() method (and registration) is removed.
-
     void Update()
     {
         if (!networkIdentity.isLocalPlayer)
