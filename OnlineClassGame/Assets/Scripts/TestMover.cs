@@ -20,5 +20,15 @@ public class TestMover : MonoBehaviour
         {
             transform.Translate(Vector3.back * Time.deltaTime * 5);
         }
+        if (Input.GetKeyDown(KeyCode.F) && NetworkManager.Instance.role == NetworkManager.NetworkRole.Server)
+        {
+            Debug.Log("Spawning object from TestMover");
+            NetworkManager.Instance.ServerSpawnAndBroadcast(0, transform.position + Vector3.up * 2, Quaternion.identity);
+        }
+        if (NetworkManager.Instance.role == NetworkManager.NetworkRole.Client && Input.GetKeyDown(KeyCode.G))
+        {
+            Debug.Log("Requesting spawn from TestMover");
+            NetworkManager.Instance.ClientRequestSpawn(0, transform.position + Vector3.up * 2, Quaternion.identity);
+        }
     }
 }

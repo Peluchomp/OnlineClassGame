@@ -3,7 +3,8 @@ using UnityEngine;
 [RequireComponent(typeof(NetworkIdentity))]
 public class NetworkTransform : MonoBehaviour
 {
-    NetworkIdentity networkIdentity;
+    [HideInInspector]
+    public NetworkIdentity networkIdentity;
 
     private Vector3 targetPosition;
     private Quaternion targetRotation;
