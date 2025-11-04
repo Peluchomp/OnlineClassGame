@@ -15,7 +15,8 @@ public class NetworkManager : MonoBehaviour
         TransformSync = 1,
         SpawnObjectBroadcast = 2,
         SpawnObjectRequest = 3,
-        SpawnObjectBroadcastOwned = 4 
+        SpawnObjectBroadcastOwned = 4, 
+        Mine = 5
     }
     public enum NetworkRole { Server, Client, Host }
     public NetworkRole role = NetworkRole.Host;
