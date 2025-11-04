@@ -16,7 +16,8 @@ public class NetworkManager : MonoBehaviour
         SpawnObjectBroadcast = 2,
         SpawnObjectRequest = 3,
         SpawnObjectBroadcastOwned = 4, 
-        DestroyObject = 5
+        DestroyObject = 5,
+        SceneObjectSync = 6
     }
     public enum NetworkRole { Server, Client, Host }
     public NetworkRole role = NetworkRole.Host;
@@ -303,6 +304,25 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
+    private byte[] SerializeSceneObjectsSync()
+    {
+        var sceneSyncs = new List<object[]>();
+        foreach (var kvp in sceneIdentities)
+        {
+            if (kvp.Value.networkId != 0)
+            {
+                sceneSyncs.Add(new object[] { kvp.Key, kvp.Value.networkId });
+            }
+        }
+        object[] data = new object[] { (byte)MessageType.SceneObjectSync, sceneSyncs };
+        using (var memoryStream = new MemoryStream())
+        {
+            var binaryFormatter = new BinaryFormatter();
+            binaryFormatter.Serialize(memoryStream, data);
+            return memoryStream.ToArray();
+        }
+    }
+
     #endregion
 
     #region SpawnMethods
@@ -472,6 +492,15 @@ public class NetworkManager : MonoBehaviour
             if (rootData == null || rootData.Length == 0)
                 return;
 
+            if (!clientEndpoints.Contains(sender))
+            {
+                clientEndpoints.Add(sender);
+                Debug.Log("Nuevo cliente conectado: " + sender.ToString());
+
+                byte[] sceneSyncMsg = SerializeSceneObjectsSync();
+                socket.SendTo(sceneSyncMsg, sender);
+            }
+
             MessageType messageType = (MessageType)(byte)rootData[0];
 
             switch (messageType)
@@ -479,12 +508,6 @@ public class NetworkManager : MonoBehaviour
                 case MessageType.TransformSync:
                     if (role != NetworkRole.Client)
                     {
-                        if (!clientEndpoints.Contains(sender))
-                        {
-                            clientEndpoints.Add(sender);
-                            Debug.Log("Nuevo cliente conectado: " + sender.ToString());
-                        }
-
                         ApplyTransformSync(rootData); 
 
                         byte[] response = SerializeTransformsBinary();
@@ -526,6 +549,24 @@ public class NetworkManager : MonoBehaviour
                     else if (role == NetworkRole.Client)
                     {
                         pendingNetIdsToDestroy.Add(networkIdToDestroy);
+                    }
+                    break;
+                case MessageType.SceneObjectSync:
+                    if (role == NetworkRole.Client)
+                    {
+                        var sceneSyncs = (List<object[]>)rootData[1];
+                        foreach (var syncData in sceneSyncs)
+                        {
+                            string sceneId = (string)syncData[0];
+                            int networkId = (int)syncData[1];
+                            NetworkIdentity identity;
+                            if (sceneIdentities.TryGetValue(sceneId, out identity))
+                            {
+                                Debug.Log($"Syncing scene object {sceneId} with NetworkId {networkId}");
+                                identity.SetNetworkId(networkId);
+                                networkIdentities[networkId] = identity;
+                            }
+                        }
                     }
                     break;
             }
@@ -605,18 +646,18 @@ public class NetworkManager : MonoBehaviour
         var ids = (List<int>)rootData[2];
         var floats = (List<float>)rootData[3];
 
-        foreach (var syncData in sceneSyncs)
-        {
-            string sceneId = (string)syncData[0];
-            int networkId = (int)syncData[1];
+        //foreach (var syncData in sceneSyncs)
+        //{
+        //    string sceneId = (string)syncData[0];
+        //    int networkId = (int)syncData[1];
 
-            NetworkIdentity identity;
-            if (sceneIdentities.TryGetValue(sceneId, out identity) && identity.networkId == 0)
-            {
-                identity.SetNetworkId(networkId);
-                networkIdentities[networkId] = identity;
-            }
-        }
+        //    NetworkIdentity identity;
+        //    if (sceneIdentities.TryGetValue(sceneId, out identity) && identity.networkId == 0)
+        //    {
+        //        identity.SetNetworkId(networkId);
+        //        networkIdentities[networkId] = identity;
+        //    }
+        //}
 
         int idx = 0;
         for (int i = 0; i < ids.Count; i++)
@@ -709,7 +750,6 @@ public class NetworkManager : MonoBehaviour
 
                 if (receivedBytes > 0)
                 {
-
                     HandleData(buffer, receivedBytes, sender);
                 }
             }
