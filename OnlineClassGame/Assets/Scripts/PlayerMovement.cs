@@ -67,6 +67,10 @@ public class PlayerMovement : MonoBehaviour
                 Debug.LogError("Cámara no encontrada como hijo del objeto del jugador. La rotación de la vista fallará.");
             }
         }
+        else {
+
+            GetComponent<Rigidbody>().isKinematic = true;
+        }
     }
 
     void Update()
