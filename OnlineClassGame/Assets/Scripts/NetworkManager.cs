@@ -16,7 +16,7 @@ public class NetworkManager : MonoBehaviour
         SpawnObjectBroadcast = 2,
         SpawnObjectRequest = 3,
         SpawnObjectBroadcastOwned = 4, 
-        Mine = 5
+        DestroyObject = 5
     }
     public enum NetworkRole { Server, Client, Host }
     public NetworkRole role = NetworkRole.Host;
@@ -26,10 +26,14 @@ public class NetworkManager : MonoBehaviour
     public int port = 9050;
     public string serverAddress = "127.0.0.1";
 
+    [HideInInspector]
+    public int connectedClientsCount => clientEndpoints.Count;
+
     public List<GameObject> spawnablePrefabs = new List<GameObject>();
 
     private List<object[]> pendingSpawnRequests = new List<object[]>();
     private Dictionary<object[],EndPoint> pendingServerSpawnRequests = new Dictionary<object[], EndPoint>();
+    private List<int> pendingNetIdsToDestroy = new List<int>();
 
     Dictionary<int, NetworkIdentity> networkIdentities = new Dictionary<int, NetworkIdentity>();
     Dictionary<string, NetworkIdentity> sceneIdentities = new Dictionary<string, NetworkIdentity>();
@@ -89,33 +93,6 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
-
-    //void Start()
-    //{
-    //    socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-
-    //    if (role == NetworkRole.Server || role == NetworkRole.Host)
-    //    {
-    //        IPEndPoint ipep = new IPEndPoint(IPAddress.Any, port);
-    //        socket.Bind(ipep);
-    //        serverThread = new Thread(ServerProcess);
-    //        serverThread.Start();
-    //        Debug.Log("Servidor UDP (Binario) iniciado en el puerto " + port);
-    //    }
-
-    //    if (role == NetworkRole.Client || role == NetworkRole.Host)
-    //    {
-    //        // A client binds to port 0 (any)
-    //        if (role == NetworkRole.Client)
-    //        {
-    //            socket.Bind(new IPEndPoint(IPAddress.Any, 0));
-    //        }
-    //        clientThread = new Thread(ClientProcess);
-    //        clientThread.Start();
-    //    }
-    //}
-
-    //No me gusta pero por ahora el server hace de host hasta que entienda mejor esto
     public void StartServer()
     {
         socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
@@ -155,33 +132,6 @@ public class NetworkManager : MonoBehaviour
         //clientThread.Start();
     }
 
-    [ContextMenu("Spawn Players For All Connections")]
-    public void SpawnPlayersContextMenu()
-    {
-        int playerPrefabId = 0;
-        Vector3 spawnPosition = transform.position + Vector3.up * 2;
-        SpawnPlayerForEachConnection(playerPrefabId, spawnPosition);
-    }
-
-    public void SpawnPlayerForEachConnection(int playerPrefabId, Vector3 spawnPosition)
-    {
-        if (role == NetworkRole.Client)
-        {
-            Debug.LogWarning("SpawnPlayerForEachConnection can only be called on the server or host.");
-            return;
-        }
-
-        Debug.Log("Spawning player for server/host.");
-        ServerSpawnAndBroadcast(playerPrefabId, spawnPosition, Quaternion.identity, null); 
-
-        foreach (var clientEndPoint in clientEndpoints)
-        {
-            Debug.Log($"Spawning player for client {clientEndPoint}.");
-            
-            ServerSpawnAndBroadcast(playerPrefabId, spawnPosition, Quaternion.identity, clientEndPoint);
-        }
-    }
-
     private void Update()
     {     
 
@@ -208,6 +158,18 @@ public class NetworkManager : MonoBehaviour
                 }
             }
         }
+
+        if (pendingNetIdsToDestroy.Count > 0)
+        {
+            lock (pendingNetIdsToDestroy)
+            {
+                foreach (var netId in pendingNetIdsToDestroy)
+                {
+                    HandleDestroyObject(netId);
+                }
+                pendingNetIdsToDestroy.Clear();
+            }
+        }
     }
     void OnDestroy()
     {
@@ -223,60 +185,13 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
-    public void ServerSpawnAndBroadcast(int prefabId, Vector3 position, Quaternion rotation, EndPoint owner = null)
-    {
-        if (role == NetworkRole.Client) return; 
-
-        if (prefabId < 0 || prefabId >= spawnablePrefabs.Count)
-        {
-            Debug.LogError($"Invalid prefabId: {prefabId}");
-            return;
-        }
-
-        GameObject prefab = spawnablePrefabs[prefabId];
-        GameObject spawnedObject = Instantiate(prefab, position, rotation);
-        NetworkIdentity identity = spawnedObject.GetComponent<NetworkIdentity>();
-
-        if (identity == null)
-        {
-            Debug.LogError("Spawned prefab does not have a NetworkIdentity component.");
-            Destroy(spawnedObject);
-            return;
-        }
-
-        RegisterIdentity(identity);
-
-        identity.SetIsLocalPlayer(owner == null);
-
-        byte[] spawnMessageRemote = SerializeSpawnBroadcast(prefabId, identity.networkId, position, rotation, MessageType.SpawnObjectBroadcast);
-        byte[] spawnMessageOwned = SerializeSpawnBroadcast(prefabId, identity.networkId, position, rotation, MessageType.SpawnObjectBroadcastOwned);
-
-        foreach (var ep in clientEndpoints)
-        {
-            try
-            {
-                if (owner != null && ep.Equals(owner))
-                {
-                    socket.SendTo(spawnMessageOwned, ep);
-                }
-                else 
-                {
-                    socket.SendTo(spawnMessageRemote, ep);
-                }
-            }
-            catch (SocketException e)
-            {
-                Debug.LogWarning($"Failed to send spawn broadcast to {ep}: {e.Message}");
-            }
-        }
-        Debug.Log($"Spawned and broadcasted object {prefab.name} with NetworkId {identity.networkId}. Owner: {(owner == null ? "Server" : owner.ToString())}");
-    }
+    #region SerializeNetworkMessages
 
     private byte[] SerializeSpawnBroadcast(int prefabId, int networkId, Vector3 pos, Quaternion rot, MessageType messageType)
     {
         object[] data = new object[]
         {
-            (byte)messageType, 
+            (byte)messageType,
             prefabId,
             networkId,
             pos.x, pos.y, pos.z,
@@ -297,12 +212,12 @@ public class NetworkManager : MonoBehaviour
         var floats = new List<float>();
         var sceneSyncs = new List<object[]>();
 
-        
+
         if (role != NetworkRole.Client)
         {
             foreach (var kvp in sceneIdentities)
             {
-                if (kvp.Value.networkId != 0) 
+                if (kvp.Value.networkId != 0)
                 {
                     sceneSyncs.Add(new object[] { kvp.Key, kvp.Value.networkId });
                 }
@@ -337,6 +252,214 @@ public class NetworkManager : MonoBehaviour
             return memoryStream.ToArray();
         }
     }
+
+    private byte[] SerializeSpawnRequest(int prefabId, Vector3 pos, Quaternion rot)
+    {
+        object[] data = new object[]
+        {
+            (byte)MessageType.SpawnObjectRequest,
+            prefabId,
+            pos.x, pos.y, pos.z,
+            rot.x, rot.y, rot.z, rot.w
+        };
+
+        using (var memoryStream = new MemoryStream())
+        {
+            var binaryFormatter = new BinaryFormatter();
+            binaryFormatter.Serialize(memoryStream, data);
+            return memoryStream.ToArray();
+        }
+    }
+
+    private byte[] SerializeDestroyObject(int networkId)
+    {
+        object[] data = new object[]
+        {
+        (byte)MessageType.DestroyObject,
+        networkId
+        };
+
+        using (var memoryStream = new MemoryStream())
+        {
+            var binaryFormatter = new BinaryFormatter();
+            binaryFormatter.Serialize(memoryStream, data);
+            return memoryStream.ToArray();
+        }
+    }
+
+    private byte[] SerializeDestroyRequest(int networkId)
+    {
+        object[] data = new object[]
+        {
+        (byte)MessageType.DestroyObject,
+        networkId
+        };
+
+        using (var memoryStream = new MemoryStream())
+        {
+            var binaryFormatter = new BinaryFormatter();
+            binaryFormatter.Serialize(memoryStream, data);
+            return memoryStream.ToArray();
+        }
+    }
+
+    #endregion
+
+    #region SpawnMethods
+
+    [ContextMenu("Spawn Players For All Connections")]
+    public void SpawnPlayersContextMenu()
+    {
+        int playerPrefabId = 0;
+        Vector3 spawnPosition = transform.position + Vector3.up * 2;
+        SpawnPlayerForEachConnection(playerPrefabId, spawnPosition);
+    }
+
+    public void SpawnPlayerForEachConnection(int playerPrefabId, Vector3 spawnPosition)
+    {
+        if (role == NetworkRole.Client)
+        {
+            Debug.LogWarning("SpawnPlayerForEachConnection can only be called on the server or host.");
+            return;
+        }
+
+        Debug.Log("Spawning player for server/host.");
+        ServerSpawnAndBroadcast(playerPrefabId, spawnPosition, Quaternion.identity, null);
+
+        foreach (var clientEndPoint in clientEndpoints)
+        {
+            Debug.Log($"Spawning player for client {clientEndPoint}.");
+
+            ServerSpawnAndBroadcast(playerPrefabId, spawnPosition, Quaternion.identity, clientEndPoint);
+        }
+    }
+
+    public void ServerSpawnAndBroadcast(int prefabId, Vector3 position, Quaternion rotation, EndPoint owner = null)
+    {
+        if (role == NetworkRole.Client) return;
+
+        if (prefabId < 0 || prefabId >= spawnablePrefabs.Count)
+        {
+            Debug.LogError($"Invalid prefabId: {prefabId}");
+            return;
+        }
+
+        GameObject prefab = spawnablePrefabs[prefabId];
+        GameObject spawnedObject = Instantiate(prefab, position, rotation);
+        NetworkIdentity identity = spawnedObject.GetComponent<NetworkIdentity>();
+
+        if (identity == null)
+        {
+            Debug.LogError("Spawned prefab does not have a NetworkIdentity component.");
+            Destroy(spawnedObject);
+            return;
+        }
+
+        RegisterIdentity(identity);
+
+        identity.SetIsLocalPlayer(owner == null);
+
+        byte[] spawnMessageRemote = SerializeSpawnBroadcast(prefabId, identity.networkId, position, rotation, MessageType.SpawnObjectBroadcast);
+        byte[] spawnMessageOwned = SerializeSpawnBroadcast(prefabId, identity.networkId, position, rotation, MessageType.SpawnObjectBroadcastOwned);
+
+        foreach (var ep in clientEndpoints)
+        {
+            try
+            {
+                if (owner != null && ep.Equals(owner))
+                {
+                    socket.SendTo(spawnMessageOwned, ep);
+                }
+                else
+                {
+                    socket.SendTo(spawnMessageRemote, ep);
+                }
+            }
+            catch (SocketException e)
+            {
+                Debug.LogWarning($"Failed to send spawn broadcast to {ep}: {e.Message}");
+            }
+        }
+        Debug.Log($"Spawned and broadcasted object {prefab.name} with NetworkId {identity.networkId}. Owner: {(owner == null ? "Server" : owner.ToString())}");
+    }
+
+    private void HandleSpawnRequest(object[] rootData, EndPoint requester)
+    {
+        int prefabId = (int)rootData[1];
+        Vector3 position = new Vector3((float)rootData[2], (float)rootData[3], (float)rootData[4]);
+        Quaternion rotation = new Quaternion((float)rootData[5], (float)rootData[6], (float)rootData[7], (float)rootData[8]);
+
+        if (prefabId < 0 || prefabId >= spawnablePrefabs.Count)
+        {
+            Debug.LogWarning($"Client sent invalid prefabId: {prefabId}");
+            return;
+        }
+
+        ServerSpawnAndBroadcast(prefabId, position, rotation, requester);
+    }
+
+    public void ClientRequestSpawn(int prefabId, Vector3 position, Quaternion rotation)
+    {
+        if (role == NetworkRole.Server) return;
+
+        byte[] requestMessage = SerializeSpawnRequest(prefabId, position, rotation);
+        IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
+
+        try
+        {
+            socket.SendTo(requestMessage, serverEp);
+        }
+        catch (SocketException e)
+        {
+            Debug.LogError($"Failed to send spawn request: {e.Message}");
+        }
+    }
+
+    private void ClientHandleSpawnBroadcast(object[] rootData)
+    {
+        MessageType messageType = (MessageType)(byte)rootData[0];
+        int prefabId = (int)rootData[1];
+        int networkId = (int)rootData[2];
+
+        if (networkIdentities.ContainsKey(networkId))
+        {
+            if (role == NetworkRole.Host && networkIdentities.TryGetValue(networkId, out var id))
+            {
+                id.SetIsLocalPlayer(messageType == MessageType.SpawnObjectBroadcastOwned);
+            }
+            return;
+        }
+
+        if (prefabId < 0 || prefabId >= spawnablePrefabs.Count)
+        {
+            Debug.LogError($"Invalid prefabId received: {prefabId}");
+            return;
+        }
+
+        Vector3 position = new Vector3((float)rootData[3], (float)rootData[4], (float)rootData[5]);
+        Quaternion rotation = new Quaternion((float)rootData[6], (float)rootData[7], (float)rootData[8], (float)rootData[9]);
+
+        GameObject prefab = spawnablePrefabs[prefabId];
+        GameObject spawnedObject = Instantiate(prefab, position, rotation);
+        NetworkIdentity identity = spawnedObject.GetComponent<NetworkIdentity>();
+
+        if (identity != null)
+        {
+            identity.SetNetworkId(networkId);
+
+            identity.SetIsLocalPlayer(messageType == MessageType.SpawnObjectBroadcastOwned);
+
+            networkIdentities[networkId] = identity;
+        }
+        else
+        {
+            Debug.LogError($"Spawned prefab {prefab.name} has no NetworkIdentity.");
+            Destroy(spawnedObject);
+        }
+    }
+
+
+    #endregion
 
     private void HandleData(byte[] data, int length, EndPoint sender)
     {
@@ -393,6 +516,18 @@ public class NetworkManager : MonoBehaviour
                         }
                     }
                     break;
+                case MessageType.DestroyObject:
+
+                    int networkIdToDestroy = (int)rootData[1];
+                    if (role == NetworkRole.Server || role == NetworkRole.Host)
+                    {
+                        BroadcastDestroyObject(networkIdToDestroy);
+                    }
+                    else if (role == NetworkRole.Client)
+                    {
+                        pendingNetIdsToDestroy.Add(networkIdToDestroy);
+                    }
+                    break;
             }
         }
         catch (System.Exception e)
@@ -401,19 +536,67 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
-    private void HandleSpawnRequest(object[] rootData, EndPoint requester)
+    private void HandleDestroyObject(int networkId)
     {
-        int prefabId = (int)rootData[1];
-        Vector3 position = new Vector3((float)rootData[2], (float)rootData[3], (float)rootData[4]);
-        Quaternion rotation = new Quaternion((float)rootData[5], (float)rootData[6], (float)rootData[7], (float)rootData[8]);
-
-        if (prefabId < 0 || prefabId >= spawnablePrefabs.Count)
+        if (networkIdentities.TryGetValue(networkId, out var identity))
         {
-            Debug.LogWarning($"Client sent invalid prefabId: {prefabId}");
+            networkIdentities.Remove(networkId);
+            if (!string.IsNullOrEmpty(identity.sceneId))
+                sceneIdentities.Remove(identity.sceneId);
+
+            Destroy(identity.gameObject);
+            Debug.Log($"Destroyed {networkId}.");
+        }
+        else
+        {
+            Debug.LogWarning($"NetworkIdentity {networkId} not found to destroy.");
+        }
+    }
+
+    public void ClientRequestDestroy(int networkId)
+    {
+        if (role != NetworkRole.Client)
+        {
+            Debug.LogWarning("Clients are the only one who can ask for permission, server can broadcast directly.");
             return;
         }
 
-        ServerSpawnAndBroadcast(prefabId, position, rotation, requester);
+        byte[] requestMessage = SerializeDestroyRequest(networkId);
+        IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
+
+        try
+        {
+            socket.SendTo(requestMessage, serverEp);
+        }
+        catch (SocketException e)
+        {
+            Debug.LogError($"Error sending request for destruction: {e.Message}");
+        }
+    }
+
+    public void BroadcastDestroyObject(int networkId)
+    {
+        if (role == NetworkRole.Client)
+        {
+            Debug.LogWarning("Clients cannot broadcast destroy messages.");
+            return;
+        }
+        
+        byte[] destroyMessage = SerializeDestroyObject(networkId);
+
+        foreach (var ep in clientEndpoints)
+        {
+            try
+            {
+                socket.SendTo(destroyMessage, ep);
+            }
+            catch (SocketException e)
+            {
+                Debug.LogWarning($"Error sending messago to {ep}: {e.Message}");
+            }
+        }
+
+        pendingNetIdsToDestroy.Add(networkId);
     }
 
     private void ApplyTransformSync(object[] rootData)
@@ -466,84 +649,6 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
-    public void ClientRequestSpawn(int prefabId, Vector3 position, Quaternion rotation)
-    {
-        if (role == NetworkRole.Server) return; 
-
-        byte[] requestMessage = SerializeSpawnRequest(prefabId, position, rotation);
-        IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
-
-        try
-        {
-            socket.SendTo(requestMessage, serverEp);
-        }
-        catch (SocketException e)
-        {
-            Debug.LogError($"Failed to send spawn request: {e.Message}");
-        }
-    }
-
-    private byte[] SerializeSpawnRequest(int prefabId, Vector3 pos, Quaternion rot)
-    {
-        object[] data = new object[]
-        {
-            (byte)MessageType.SpawnObjectRequest,
-            prefabId,
-            pos.x, pos.y, pos.z,
-            rot.x, rot.y, rot.z, rot.w
-        };
-
-        using (var memoryStream = new MemoryStream())
-        {
-            var binaryFormatter = new BinaryFormatter();
-            binaryFormatter.Serialize(memoryStream, data);
-            return memoryStream.ToArray();
-        }
-    }
-
-    private void ClientHandleSpawnBroadcast(object[] rootData)
-    {
-        MessageType messageType = (MessageType)(byte)rootData[0];
-        int prefabId = (int)rootData[1];
-        int networkId = (int)rootData[2];
-
-        if (networkIdentities.ContainsKey(networkId))
-        {
-            if (role == NetworkRole.Host && networkIdentities.TryGetValue(networkId, out var id))
-            {
-                id.SetIsLocalPlayer(messageType == MessageType.SpawnObjectBroadcastOwned);
-            }
-            return;
-        }
-
-        if (prefabId < 0 || prefabId >= spawnablePrefabs.Count)
-        {
-            Debug.LogError($"Invalid prefabId received: {prefabId}");
-            return;
-        }
-
-        Vector3 position = new Vector3((float)rootData[3], (float)rootData[4], (float)rootData[5]);
-        Quaternion rotation = new Quaternion((float)rootData[6], (float)rootData[7], (float)rootData[8], (float)rootData[9]);
-
-        GameObject prefab = spawnablePrefabs[prefabId];
-        GameObject spawnedObject = Instantiate(prefab, position, rotation);
-        NetworkIdentity identity = spawnedObject.GetComponent<NetworkIdentity>();
-
-        if (identity != null)
-        {
-            identity.SetNetworkId(networkId);
-
-            identity.SetIsLocalPlayer(messageType == MessageType.SpawnObjectBroadcastOwned);
-
-            networkIdentities[networkId] = identity;
-        }
-        else
-        {
-            Debug.LogError($"Spawned prefab {prefab.name} has no NetworkIdentity.");
-            Destroy(spawnedObject);
-        }
-    }
-
     void ServerProcess()
     {
         byte[] buffer = new byte[2048];
@@ -573,7 +678,6 @@ public class NetworkManager : MonoBehaviour
             }
         }
     }
-
     void ClientProcess()
     {
         IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);

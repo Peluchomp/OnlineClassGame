@@ -30,5 +30,15 @@ public class TestMover : MonoBehaviour
             Debug.Log("Requesting spawn from TestMover");
             NetworkManager.Instance.ClientRequestSpawn(0, transform.position + Vector3.up * 2, Quaternion.identity);
         }
+        if (NetworkManager.Instance.role == NetworkManager.NetworkRole.Server && Input.GetKeyDown(KeyCode.H))
+        {
+            Debug.Log("Broadcasting despawn from TestMover");
+            NetworkManager.Instance.BroadcastDestroyObject(1);
+        }
+        if (NetworkManager.Instance.role == NetworkManager.NetworkRole.Client && Input.GetKeyDown(KeyCode.J))
+        {
+            Debug.Log("Requesting despawn from TestMover");
+            NetworkManager.Instance.ClientRequestDestroy(1);
+        }
     }
 }

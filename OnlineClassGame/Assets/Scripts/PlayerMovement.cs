@@ -40,6 +40,12 @@ public class PlayerMovement : MonoBehaviour
         {
             Debug.LogError("Collider no encontrado. La detección de suelo fallará.");
         }
+
+        if (NetworkManager.Instance.role == NetworkManager.NetworkRole.Client)
+        {
+            LobbyManager.Instance.ClientStart();
+        }
+
     }
 
 
