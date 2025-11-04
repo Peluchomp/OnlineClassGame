@@ -1,3 +1,4 @@
+using System.Collections;
 using TMPro;
 using UnityEngine;
 
@@ -48,9 +49,12 @@ public class LobbyManager : MonoBehaviour
     public void StartGame()
     {
         NetworkManager.Instance.SpawnPlayersContextMenu();
+
+        StartCoroutine(NetworkManager.Instance.WaitAndSpawnRopes());
         lobbyCam.SetActive(false);
         gameObject.SetActive(false);
     }
+
 
     public void ClientStart()
     {

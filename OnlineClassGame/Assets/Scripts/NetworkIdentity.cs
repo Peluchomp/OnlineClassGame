@@ -18,6 +18,10 @@ public class NetworkIdentity : MonoBehaviour
     {
         networkTransform = GetComponent<NetworkTransform>();
     }
+    private void Reset()
+    {
+        m_sceneId = System.Guid.NewGuid().ToString();
+    }
 
     private void Start()
     {

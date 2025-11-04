@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -17,7 +18,8 @@ public class NetworkManager : MonoBehaviour
         SpawnObjectRequest = 3,
         SpawnObjectBroadcastOwned = 4, 
         DestroyObject = 5,
-        SceneObjectSync = 6
+        SceneObjectSync = 6,
+        SpawnRopeAttachments = 7
     }
     public enum NetworkRole { Server, Client, Host }
     public NetworkRole role = NetworkRole.Host;
@@ -27,6 +29,9 @@ public class NetworkManager : MonoBehaviour
     public int port = 9050;
     public string serverAddress = "127.0.0.1";
 
+    // will move it away from networkManager on a later delivery
+    public Transform fixedRopeAnchor;
+
     [HideInInspector]
     public int connectedClientsCount => clientEndpoints.Count;
 
@@ -35,6 +40,7 @@ public class NetworkManager : MonoBehaviour
     private List<object[]> pendingSpawnRequests = new List<object[]>();
     private Dictionary<object[],EndPoint> pendingServerSpawnRequests = new Dictionary<object[], EndPoint>();
     private List<int> pendingNetIdsToDestroy = new List<int>();
+    private List<object[]> pendingRpcCalls = new List<object[]>();
 
     Dictionary<int, NetworkIdentity> networkIdentities = new Dictionary<int, NetworkIdentity>();
     Dictionary<string, NetworkIdentity> sceneIdentities = new Dictionary<string, NetworkIdentity>();
@@ -169,6 +175,18 @@ public class NetworkManager : MonoBehaviour
                     HandleDestroyObject(netId);
                 }
                 pendingNetIdsToDestroy.Clear();
+            }
+        }
+
+        if (pendingRpcCalls.Count > 0)
+        {
+            lock (pendingRpcCalls)
+            {
+                foreach (var rpcData in pendingRpcCalls)
+                {
+                    HandleRpc(rpcData);
+                }
+                pendingRpcCalls.Clear();
             }
         }
     }
@@ -323,6 +341,16 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
+    private byte[] SerializeRpc(object[] rpcData)
+    {
+        using (var memoryStream = new MemoryStream())
+        {
+            var binaryFormatter = new BinaryFormatter();
+            binaryFormatter.Serialize(memoryStream, rpcData);
+            return memoryStream.ToArray();
+        }
+    }
+
     #endregion
 
     #region SpawnMethods
@@ -333,6 +361,7 @@ public class NetworkManager : MonoBehaviour
         int playerPrefabId = 0;
         Vector3 spawnPosition = transform.position + Vector3.up * 2;
         SpawnPlayerForEachConnection(playerPrefabId, spawnPosition);
+        StartCoroutine(WaitAndSpawnRopes());
     }
 
     public void SpawnPlayerForEachConnection(int playerPrefabId, Vector3 spawnPosition)
@@ -354,14 +383,14 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
-    public void ServerSpawnAndBroadcast(int prefabId, Vector3 position, Quaternion rotation, EndPoint owner = null)
+    public NetworkIdentity ServerSpawnAndBroadcast(int prefabId, Vector3 position, Quaternion rotation, EndPoint owner = null)
     {
-        if (role == NetworkRole.Client) return;
+        if (role == NetworkRole.Client) return null;
 
         if (prefabId < 0 || prefabId >= spawnablePrefabs.Count)
         {
             Debug.LogError($"Invalid prefabId: {prefabId}");
-            return;
+            return null;
         }
 
         GameObject prefab = spawnablePrefabs[prefabId];
@@ -372,7 +401,7 @@ public class NetworkManager : MonoBehaviour
         {
             Debug.LogError("Spawned prefab does not have a NetworkIdentity component.");
             Destroy(spawnedObject);
-            return;
+            return null;
         }
 
         RegisterIdentity(identity);
@@ -401,6 +430,7 @@ public class NetworkManager : MonoBehaviour
             }
         }
         Debug.Log($"Spawned and broadcasted object {prefab.name} with NetworkId {identity.networkId}. Owner: {(owner == null ? "Server" : owner.ToString())}");
+        return identity;
     }
 
     private void HandleSpawnRequest(object[] rootData, EndPoint requester)
@@ -508,11 +538,11 @@ public class NetworkManager : MonoBehaviour
                 case MessageType.TransformSync:
                     if (role != NetworkRole.Client)
                     {
-                        ApplyTransformSync(rootData); 
+                        ApplyTransformSync(rootData);
 
                         byte[] response = SerializeTransformsBinary();
                         socket.SendTo(response, sender);
-                    }                   
+                    }
                     else
                     {
                         ApplyTransformSync(rootData);
@@ -562,11 +592,16 @@ public class NetworkManager : MonoBehaviour
                             NetworkIdentity identity;
                             if (sceneIdentities.TryGetValue(sceneId, out identity))
                             {
-                                Debug.Log($"Syncing scene object {sceneId} with NetworkId {networkId}");
                                 identity.SetNetworkId(networkId);
                                 networkIdentities[networkId] = identity;
                             }
                         }
+                    }
+                    break;
+                case MessageType.SpawnRopeAttachments:
+                    lock (pendingRpcCalls)
+                    {
+                        pendingRpcCalls.Add(rootData);
                     }
                     break;
             }
@@ -757,4 +792,99 @@ public class NetworkManager : MonoBehaviour
             Thread.Sleep(33);
         }
     }
+
+    public IEnumerator WaitAndSpawnRopes()
+    {
+        yield return new WaitForSeconds(1f);
+        SpawnRopesForEachPlayer();
+    }
+
+
+    #region RopeAttachment
+    [ContextMenu("Spawn Ropes For All Players")]
+    public void SpawnRopesForEachPlayer()
+    {
+        if (role == NetworkRole.Client) return;
+        if (fixedRopeAnchor == null)
+        {
+            Debug.LogError("FixedRopeAnchor is not set in NetworkManager.");
+            return;
+        }
+        Debug.Log("Spawning ropes for all players.");
+        var anchorIdentity = fixedRopeAnchor.GetComponent<NetworkIdentity>();
+        if (anchorIdentity == null || anchorIdentity.networkId == 0)
+        {
+            Debug.LogError("FixedRopeAnchor must have a NetworkIdentity with a valid networkId.");
+            return;
+        }
+
+        var players = networkIdentities.Values.Where(id => id.CompareTag("Player")).ToList();
+
+        foreach (var player in players)
+        {
+            NetworkIdentity ropeIdentity = ServerSpawnAndBroadcast(1, Vector3.zero, Quaternion.identity);
+            if (ropeIdentity != null)
+            {
+                ClientRpcAttachRope(ropeIdentity.networkId, anchorIdentity.networkId, player.networkId);
+            }
+        }
+    }
+
+    private void ClientRpcAttachRope(int ropeNetId, int anchorNetId, int playerNetId)
+    {
+        object[] rpcData = new object[]
+        {
+            (byte)MessageType.SpawnRopeAttachments,
+            ropeNetId,
+            anchorNetId,
+            playerNetId
+        };
+
+        byte[] rpcMessage = SerializeRpc(rpcData);
+
+        // Send to all clients
+        foreach (var ep in clientEndpoints)
+        {
+            try
+            {
+                socket.SendTo(rpcMessage, ep);
+            }
+            catch (SocketException e)
+            {
+                Debug.LogWarning($"Error sending RPC to {ep}: {e.Message}");
+            }
+        }
+
+        // Execute on server/host as well
+        if (role != NetworkRole.Client)
+        {
+            pendingRpcCalls.Add(rpcData);
+        }
+    }
+
+    private void HandleRpc(object[] rpcData)
+    {
+        MessageType messageType = (MessageType)(byte)rpcData[0];
+        if (messageType == MessageType.SpawnRopeAttachments)
+        {
+            int ropeNetId = (int)rpcData[1];
+            int anchorNetId = (int)rpcData[2];
+            int playerNetId = (int)rpcData[3];
+
+            if (networkIdentities.TryGetValue(ropeNetId, out var ropeIdentity) &&
+                networkIdentities.TryGetValue(anchorNetId, out var anchorIdentity) &&
+                networkIdentities.TryGetValue(playerNetId, out var playerIdentity))
+            {
+
+                RopeAttach ropeAttach = ropeIdentity.GetComponentInChildren<RopeAttach>();
+                if (ropeAttach != null)
+                {
+                    StartCoroutine(ropeAttach.AttachAndSnap(anchorIdentity.transform, 0));
+                    StartCoroutine(ropeAttach.AttachAndSnap(playerIdentity.transform, 1));
+                }
+            }
+        }
+    }
+    #endregion
+
 }
