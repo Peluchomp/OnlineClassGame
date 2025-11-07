@@ -33,11 +33,11 @@ public class RopeAttach : MonoBehaviour
 
         if (initialTarget != null)
         {
-            StartCoroutine(AttachAndSnap(initialTarget, initialControlPointIndex));
+            StartCoroutine(AttachAndSnap(initialTarget, initialControlPointIndex,true));
         }
     }
 
-    public IEnumerator AttachAndSnap(Transform target, int controlPointIndex)
+    public IEnumerator AttachAndSnap(Transform target, int controlPointIndex, bool isStatic)
     {
         while (!isReady)
         {
@@ -57,7 +57,14 @@ public class RopeAttach : MonoBehaviour
 
         attachment.enabled = false;
 
-        attachment.attachmentType = ObiParticleAttachment.AttachmentType.Static;
+        if (isStatic)
+        {
+            attachment.attachmentType = ObiParticleAttachment.AttachmentType.Static;
+        }
+        else
+        {
+            attachment.attachmentType = ObiParticleAttachment.AttachmentType.Dynamic;
+        }
 
         foreach (int particleIndex in groupToAttach.particleIndices)
         {

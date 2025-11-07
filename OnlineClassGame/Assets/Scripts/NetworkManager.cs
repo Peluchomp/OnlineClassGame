@@ -681,19 +681,6 @@ public class NetworkManager : MonoBehaviour
         var ids = (List<int>)rootData[2];
         var floats = (List<float>)rootData[3];
 
-        //foreach (var syncData in sceneSyncs)
-        //{
-        //    string sceneId = (string)syncData[0];
-        //    int networkId = (int)syncData[1];
-
-        //    NetworkIdentity identity;
-        //    if (sceneIdentities.TryGetValue(sceneId, out identity) && identity.networkId == 0)
-        //    {
-        //        identity.SetNetworkId(networkId);
-        //        networkIdentities[networkId] = identity;
-        //    }
-        //}
-
         int idx = 0;
         for (int i = 0; i < ids.Count; i++)
         {
@@ -822,7 +809,7 @@ public class NetworkManager : MonoBehaviour
 
         foreach (var player in players)
         {
-            NetworkIdentity ropeIdentity = ServerSpawnAndBroadcast(1, Vector3.zero, Quaternion.identity);
+            NetworkIdentity ropeIdentity = ServerSpawnAndBroadcast(1, transform.position, Quaternion.identity);
             if (ropeIdentity != null)
             {
                 ClientRpcAttachRope(ropeIdentity.networkId, anchorIdentity.networkId, player.networkId);
@@ -842,7 +829,6 @@ public class NetworkManager : MonoBehaviour
 
         byte[] rpcMessage = SerializeRpc(rpcData);
 
-        // Send to all clients
         foreach (var ep in clientEndpoints)
         {
             try
@@ -855,7 +841,6 @@ public class NetworkManager : MonoBehaviour
             }
         }
 
-        // Execute on server/host as well
         if (role != NetworkRole.Client)
         {
             pendingRpcCalls.Add(rpcData);
@@ -879,8 +864,8 @@ public class NetworkManager : MonoBehaviour
                 RopeAttach ropeAttach = ropeIdentity.GetComponentInChildren<RopeAttach>();
                 if (ropeAttach != null)
                 {
-                    StartCoroutine(ropeAttach.AttachAndSnap(anchorIdentity.transform, 0));
-                    StartCoroutine(ropeAttach.AttachAndSnap(playerIdentity.transform, 1));
+                    StartCoroutine(ropeAttach.AttachAndSnap(anchorIdentity.transform, 0, true));
+                    StartCoroutine(ropeAttach.AttachAndSnap(playerIdentity.transform, 1, false));
                 }
             }
         }
