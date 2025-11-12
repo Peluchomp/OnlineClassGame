@@ -26,6 +26,7 @@ public class LobbyManager : MonoBehaviour
 
     public void StartClient()
     {
+        NetworkManager.Instance.DiscoverServer();
         NetworkManager.Instance.StartClient();
         startHostGo.SetActive(false);
         clientText.gameObject.SetActive(true);

@@ -29,6 +29,9 @@ public class NetworkManager : MonoBehaviour
     public int port = 9050;
     public string serverAddress = "127.0.0.1";
 
+    private Thread discoveryThread;
+    private const int discoveryPort = 9051;
+
     // will move it away from networkManager on a later delivery
     public Transform fixedRopeAnchor;
 
@@ -109,8 +112,12 @@ public class NetworkManager : MonoBehaviour
         socket.Bind(ipep);
         serverThread = new Thread(ServerProcess);
         serverThread.Start();
+
+        // Iniciar hilo de descubrimiento
+        discoveryThread = new Thread(ServerDiscoveryProcess);
+        discoveryThread.Start();
+
         Debug.Log("Servidor UDP (Binario) iniciado en el puerto " + port);
-       
     }
 
     public void StartClient()
@@ -137,6 +144,93 @@ public class NetworkManager : MonoBehaviour
         //Debug.Log("Servidor UDP (Binario) iniciado en el puerto " + port);
         //clientThread = new Thread(ClientProcess);
         //clientThread.Start();
+    }
+
+    private void ServerDiscoveryProcess()
+    {
+        using (var discoverySocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+        {
+            IPEndPoint ipep = new IPEndPoint(IPAddress.Any, discoveryPort);
+            discoverySocket.Bind(ipep);
+
+            byte[] buffer = new byte[256];
+            while (!m_cancel)
+            {
+                EndPoint sender = new IPEndPoint(IPAddress.Any, 0);
+                int received = 0;
+                try
+                {
+                    if (discoverySocket.Available == 0)
+                    {
+                        Thread.Sleep(10);
+                        continue;
+                    }
+                    received = discoverySocket.ReceiveFrom(buffer, ref sender);
+                }
+                catch (SocketException) { break; }
+                catch (System.ObjectDisposedException) { break; }
+
+                if (received > 0)
+                {
+                    string msg = System.Text.Encoding.UTF8.GetString(buffer, 0, received);
+                    if (msg == "DISCOVER_SERVER")
+                    {
+                        string localIp = GetLocalIPAddress();
+                        string response = "SERVER_HERE|" + localIp;
+                        byte[] responseBytes = System.Text.Encoding.UTF8.GetBytes(response);
+                        discoverySocket.SendTo(responseBytes, sender);
+                    }
+                }
+            }
+        }
+    }
+    public void DiscoverServer(int timeoutMs = 2000)
+    {
+        using (var discoverySocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+        {
+            discoverySocket.EnableBroadcast = true;
+            discoverySocket.ReceiveTimeout = timeoutMs;
+
+            byte[] discoveryMsg = System.Text.Encoding.UTF8.GetBytes("DISCOVER_SERVER");
+            IPEndPoint broadcastEp = new IPEndPoint(IPAddress.Broadcast, discoveryPort);
+
+            // Enviar broadcast
+            discoverySocket.SendTo(discoveryMsg, broadcastEp);
+
+            // Esperar respuesta
+            EndPoint serverEp = new IPEndPoint(IPAddress.Any, 0);
+            try
+            {
+                byte[] buffer = new byte[256];
+                int received = discoverySocket.ReceiveFrom(buffer, ref serverEp);
+                string response = System.Text.Encoding.UTF8.GetString(buffer, 0, received);
+                if (response.StartsWith("SERVER_HERE"))
+                {
+                    string[] parts = response.Split('|');
+                    if (parts.Length > 1)
+                    {
+                        serverAddress = parts[1];
+                        Debug.Log("Servidor descubierto en: " + serverAddress);
+                    }
+                }
+            }
+            catch (SocketException)
+            {
+                Debug.LogWarning("No se encontró ningún servidor en la red local.");
+            }
+        }
+    }
+    private string GetLocalIPAddress()
+    {
+        var host = Dns.GetHostEntry(Dns.GetHostName());
+        foreach (var ip in host.AddressList)
+        {
+            if (ip.AddressFamily == AddressFamily.InterNetwork)
+            {
+                return ip.ToString();
+            }
+        }
+        return "127.0.0.1";
     }
 
     private void Update()
@@ -196,6 +290,7 @@ public class NetworkManager : MonoBehaviour
 
         serverThread?.Abort();
         clientThread?.Abort();
+        discoveryThread?.Abort();
 
         if (socket != null)
         {
