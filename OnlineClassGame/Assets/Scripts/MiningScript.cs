@@ -7,6 +7,8 @@ public class MiningScript : MonoBehaviour
     [SerializeField] private float rayDistance = 5f;
     [SerializeField] private Camera playerCamera;
 
+    [SerializeField] Animator animator;
+
     private CrosshairController crosshairController;
 
     void Start()
@@ -39,6 +41,10 @@ public class MiningScript : MonoBehaviour
                         else
                         {
                             NetworkManager.Instance.ClientRequestDestroy(hit.collider.GetComponent<NetworkIdentity>().networkId);
+                        }
+                        if (animator != null)
+                        {
+                            animator.SetTrigger("Mine");
                         }
                     }
                 }
