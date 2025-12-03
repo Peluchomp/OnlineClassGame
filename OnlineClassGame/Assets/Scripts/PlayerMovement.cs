@@ -9,6 +9,7 @@ public class PlayerMovement : MonoBehaviour
     private Rigidbody rb;
     private Collider playerCollider;
 
+    private PlayerInput playerInput;
 
     private Transform cameraTransform; 
     private float rotationX = 0f; 
@@ -18,16 +19,16 @@ public class PlayerMovement : MonoBehaviour
     [SerializeField] private float jumpForce = 1000.0f;
 
     [Header("Control de Cámara")]
-    [SerializeField] private float mouseSensitivity = 100f;
+    [SerializeField] private float mouseSensitivity = 1;
     [SerializeField] private float lookXLimit = 80.0f; 
 
     [Header("Detección de Suelo")]
-    [SerializeField] private LayerMask groundLayer;
+    private LayerMask groundLayer;
     [SerializeField] private float groundCheckDistance = 0.2f;
-
 
     void Awake()
     {
+        groundLayer = LayerMask.GetMask("Ground");
         networkIdentity = GetComponent<NetworkIdentity>();
         rb = GetComponent<Rigidbody>();
         playerCollider = GetComponent<Collider>();
@@ -47,7 +48,6 @@ public class PlayerMovement : MonoBehaviour
         }
 
     }
-
 
     void Start()
     {
@@ -71,55 +71,36 @@ public class PlayerMovement : MonoBehaviour
 
             GetComponent<Rigidbody>().isKinematic = true;
         }
+
+        if (playerInput == null)
+        {
+            playerInput = GetComponent<PlayerInput>();
+            if (playerInput == null)
+            {
+                Debug.LogError("PlayerInput no encontrado en el objeto del jugador. La entrada del jugador fallará.");
+            }
+        }
     }
 
     void Update()
     {
-
         if (networkIdentity == null || !networkIdentity.isLocalPlayer)
         {
             return;
         }
 
-        HandleMovementInput();
-        HandleJumpInput();
-        HandleLookInput(); 
-
         IsGrounded(true);
     }
 
-
-    private void HandleMovementInput()
+    public void HandleMovement(Vector2 moveInput)
     {
-        float horizontalInput = 0f;
-        float verticalInput = 0f;
-
-
-        if (Input.GetKey(KeyCode.W))
-        {
-            verticalInput += 1f;
-        }
-        if (Input.GetKey(KeyCode.S))
-        {
-            verticalInput -= 1f;
-        }
-        if (Input.GetKey(KeyCode.A))
-        {
-            horizontalInput -= 1f;
-        }
-        if (Input.GetKey(KeyCode.D))
-        {
-            horizontalInput += 1f;
-        }
-
-        // El movimiento usa Space.Self, que es relativo a la rotación del cuerpo
-        Vector3 movement = new Vector3(horizontalInput, 0, verticalInput).normalized * moveSpeed * Time.deltaTime;
+        Vector3 movement = new Vector3(moveInput.x, 0, moveInput.y).normalized * moveSpeed * Time.deltaTime;
         transform.Translate(movement, Space.Self);
     }
 
-    private void HandleJumpInput()
+    public void HandleJump()
     {
-        if (rb != null && Input.GetKeyDown(KeyCode.Space))
+        if (rb != null)
         {
             if (IsGrounded())
             {
@@ -129,24 +110,18 @@ public class PlayerMovement : MonoBehaviour
         }
     }
 
-
-    private void HandleLookInput()
+    public void HandleLook(Vector2 lookDelta)
     {
         if (cameraTransform == null) return;
 
-        // Obtener movimiento del ratón
-        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity * Time.deltaTime;
-        float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity * Time.deltaTime;
-
-        rotationX -= mouseY;
+        rotationX -= lookDelta.y;
 
         rotationX = Mathf.Clamp(rotationX, -lookXLimit, lookXLimit);
 
         cameraTransform.localRotation = Quaternion.Euler(rotationX, 0f, 0f);
 
-        transform.Rotate(Vector3.up * mouseX);
+        transform.Rotate(Vector3.up * lookDelta.x);
     }
-    // ------------------------------------
 
     private bool IsGrounded(bool debug = false)
     {

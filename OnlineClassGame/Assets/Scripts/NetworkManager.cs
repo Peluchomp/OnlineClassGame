@@ -456,7 +456,6 @@ public class NetworkManager : MonoBehaviour
         int playerPrefabId = 0;
         Vector3 spawnPosition = transform.position + Vector3.up * 2;
         SpawnPlayerForEachConnection(playerPrefabId, spawnPosition);
-        StartCoroutine(WaitAndSpawnRopes());
     }
 
     public void SpawnPlayerForEachConnection(int playerPrefabId, Vector3 spawnPosition)

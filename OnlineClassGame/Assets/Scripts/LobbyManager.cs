@@ -51,7 +51,6 @@ public class LobbyManager : MonoBehaviour
     {
         NetworkManager.Instance.SpawnPlayersContextMenu();
 
-        StartCoroutine(NetworkManager.Instance.WaitAndSpawnRopes());
         lobbyCam.SetActive(false);
         gameObject.SetActive(false);
     }

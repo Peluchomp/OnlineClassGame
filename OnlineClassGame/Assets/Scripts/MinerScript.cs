@@ -1,19 +1,43 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
-public class MiningScript : MonoBehaviour
+public class MinerScript : MonoBehaviour
 {
-    [SerializeField] private string targetTag = "Destructible";
-    [SerializeField] private LayerMask targetLayer;
+    string targetTag = "Mineral";
+    LayerMask targetLayer;
     [SerializeField] private float rayDistance = 5f;
     [SerializeField] private Camera playerCamera;
 
     [SerializeField] Animator animator;
 
+    private PlayerInput playerInput;
+
+    bool minerActionPressed = false;
+
     private CrosshairController crosshairController;
+
+    private void Awake()
+    {
+        targetLayer = LayerMask.GetMask("Mineral");
+
+        if (playerInput == null)
+        {
+            playerInput = GetComponent<PlayerInput>();
+            if (playerInput == null)
+            {
+                Debug.LogError("PlayerInput no encontrado en el objeto del jugador. La entrada del jugador fallará.");
+            }
+        }
+    }
 
     void Start()
     {
         crosshairController = FindFirstObjectByType<CrosshairController>();
+    }
+
+    public void HandleMining()
+    {
+        minerActionPressed = true;
     }
 
     void Update()
@@ -30,7 +54,7 @@ public class MiningScript : MonoBehaviour
             {
                 isPointingAtTarget = true;
 
-                if (Input.GetMouseButtonDown(0))
+                if (minerActionPressed)
                 {
                     if (hit.collider.GetComponent<NetworkIdentity>() != null)
                     {
@@ -62,5 +86,6 @@ public class MiningScript : MonoBehaviour
                 crosshairController.ActivateNormalCrosshair();
             }
         }
+        minerActionPressed = false;
     }
 }
