@@ -341,7 +341,7 @@ public class NetworkManager : MonoBehaviour
         foreach (var identity in networkIdentities.Values)
         {
             var t = identity.NetworkTransform;
-            if (t != null && identity.isLocalPlayer)
+            if (t != null && identity.isLocalPlayer == true && t.sendData == true)
             {
                 ids.Add(identity.networkId);
                 floats.Add(t.netwPos.x);

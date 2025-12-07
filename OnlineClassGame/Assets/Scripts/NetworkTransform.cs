@@ -15,6 +15,17 @@ public class NetworkTransform : MonoBehaviour
     public Quaternion netwRot;
     public Vector3 netwScale;
 
+    // Thresholds
+    private float positionThreshold = 0.01f;
+    private float rotationThreshold = 0.5f;
+    private float scaleThreshold = 0.01f;
+
+    private Vector3 lastPosition;
+    private Quaternion lastRotation;
+    private Vector3 lastScale;
+
+    public bool sendData { get; private set; }
+
     void Awake()
     {
         networkIdentity = GetComponent<NetworkIdentity>();
@@ -26,6 +37,10 @@ public class NetworkTransform : MonoBehaviour
         netwPos = transform.position;
         netwRot = transform.rotation;
         netwScale = transform.localScale;
+
+        lastPosition = transform.position;
+        lastRotation = transform.rotation;
+        lastScale = transform.localScale;
     }
 
     void Update()
@@ -38,9 +53,22 @@ public class NetworkTransform : MonoBehaviour
         }
         else
         {
-            netwPos = transform.position;
-            netwRot = transform.rotation;
-            netwScale = transform.localScale;
+            bool positionChanged = Vector3.Distance(transform.position, lastPosition) > positionThreshold;
+            bool rotationChanged = Quaternion.Angle(transform.rotation, lastRotation) > rotationThreshold;
+            bool scaleChanged = Vector3.Distance(transform.localScale, lastScale) > scaleThreshold;
+
+            sendData = positionChanged || rotationChanged || scaleChanged;
+            Debug.Log($"[NetworkTransform] sendData: {sendData} (PosChanged: {positionChanged}, RotChanged: {rotationChanged}, ScaleChanged: {scaleChanged})");
+            if (sendData)
+            {
+                netwPos = transform.position;
+                netwRot = transform.rotation;
+                netwScale = transform.localScale;
+
+                lastPosition = transform.position;
+                lastRotation = transform.rotation;
+                lastScale = transform.localScale;
+            }
         }
     }
 

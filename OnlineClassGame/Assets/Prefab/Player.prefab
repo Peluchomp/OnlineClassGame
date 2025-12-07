@@ -270,13 +270,13 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 2406425476287628690}
-  - component: {fileID: 3058543716241393620}
-  - component: {fileID: 1388533003892696838}
-  - component: {fileID: 2078078259196290705}
   - component: {fileID: 4372167188724531778}
   - component: {fileID: 976768463172205853}
   - component: {fileID: 3431767870954391638}
   - component: {fileID: 4596739619000689317}
+  - component: {fileID: 3058543716241393620}
+  - component: {fileID: 1388533003892696838}
+  - component: {fileID: 2078078259196290705}
   - component: {fileID: 7078348922222171603}
   - component: {fileID: 7621773512296133922}
   m_Layer: 0
@@ -304,51 +304,6 @@ Transform:
   - {fileID: 5229030737159559225}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &3058543716241393620
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3914211626380528117}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a6ed7308ec0dd1f479f21d334263645d, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::NetworkIdentity
-  m_sceneId: 
-  networkId: 0
-  isLocalPlayer: 0
---- !u!114 &1388533003892696838
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3914211626380528117}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe24e9f013d87f84b99dc151d79d81f7, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::NetworkTransform
-  networkIdentity: {fileID: 0}
-  netwPos: {x: 0, y: 0, z: 0}
-  netwRot: {x: 0, y: 0, z: 0, w: 0}
-  netwScale: {x: 0, y: 0, z: 0}
---- !u!114 &2078078259196290705
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3914211626380528117}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7b5ccf3548c43ba44815eb2b68251d6e, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PlayerInput
-  playerMovement: {fileID: 7078348922222171603}
-  minerScript: {fileID: 7621773512296133922}
 --- !u!33 &4372167188724531778
 MeshFilter:
   m_ObjectHideFlags: 0
@@ -455,6 +410,51 @@ Rigidbody:
   m_Interpolate: 0
   m_Constraints: 112
   m_CollisionDetection: 0
+--- !u!114 &3058543716241393620
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3914211626380528117}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a6ed7308ec0dd1f479f21d334263645d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NetworkIdentity
+  m_sceneId: 
+  networkId: 0
+  isLocalPlayer: 0
+--- !u!114 &1388533003892696838
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3914211626380528117}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fe24e9f013d87f84b99dc151d79d81f7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NetworkTransform
+  networkIdentity: {fileID: 0}
+  netwPos: {x: 0, y: 0, z: 0}
+  netwRot: {x: 0, y: 0, z: 0, w: 0}
+  netwScale: {x: 0, y: 0, z: 0}
+--- !u!114 &2078078259196290705
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3914211626380528117}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7b5ccf3548c43ba44815eb2b68251d6e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerInput
+  playerMovement: {fileID: 7078348922222171603}
+  minerScript: {fileID: 7621773512296133922}
 --- !u!114 &7078348922222171603
 MonoBehaviour:
   m_ObjectHideFlags: 0
