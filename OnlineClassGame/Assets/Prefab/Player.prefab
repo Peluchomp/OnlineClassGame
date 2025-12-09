@@ -143,7 +143,8 @@ Transform:
   m_LocalPosition: {x: 0, y: 0.543, z: 0.24300003}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 6490689503163602754}
   m_Father: {fileID: 3273356930057437542}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!20 &5854963731831401966
@@ -279,6 +280,7 @@ GameObject:
   - component: {fileID: 2078078259196290705}
   - component: {fileID: 7078348922222171603}
   - component: {fileID: 7621773512296133922}
+  - component: {fileID: 5710319050303897888}
   m_Layer: 0
   m_Name: Player
   m_TagString: Player
@@ -469,7 +471,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerMovement
   moveSpeed: 7
   jumpForce: 15
-  mouseSensitivity: 0.01
+  mouseSensitivity: 0.1
   lookXLimit: 80
   groundCheckDistance: 0.5
 --- !u!114 &7621773512296133922
@@ -487,6 +489,54 @@ MonoBehaviour:
   rayDistance: 5
   playerCamera: {fileID: 5854963731831401966}
   animator: {fileID: 6217630404375410998}
+--- !u!114 &5710319050303897888
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3914211626380528117}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fc0294189ac0b6242bf3004d568bd412, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerGrabber
+  grabRange: 3
+  grabLayer:
+    serializedVersion: 2
+    m_Bits: 128
+  holdPoint: {fileID: 6490689503163602754}
+--- !u!1 &4613174769585991864
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6490689503163602754}
+  m_Layer: 0
+  m_Name: Hold Point
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6490689503163602754
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4613174769585991864}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: -0.322, z: 1.23}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 3431824572183042910}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &4918707148227532510
 GameObject:
   m_ObjectHideFlags: 0

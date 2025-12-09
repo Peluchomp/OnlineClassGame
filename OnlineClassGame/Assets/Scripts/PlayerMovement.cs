@@ -19,7 +19,7 @@ public class PlayerMovement : MonoBehaviour
     [SerializeField] private float jumpForce = 1000.0f;
 
     [Header("Control de Cámara")]
-    [SerializeField] private float mouseSensitivity = 1;
+    [SerializeField] private float mouseSensitivity = 0.5f;
     [SerializeField] private float lookXLimit = 80.0f; 
 
     [Header("Detección de Suelo")]
@@ -114,13 +114,16 @@ public class PlayerMovement : MonoBehaviour
     {
         if (cameraTransform == null) return;
 
-        rotationX -= lookDelta.y;
+        float lookX = lookDelta.x * mouseSensitivity;
+        float lookY = lookDelta.y * mouseSensitivity;
+
+        rotationX -= lookY;
 
         rotationX = Mathf.Clamp(rotationX, -lookXLimit, lookXLimit);
 
         cameraTransform.localRotation = Quaternion.Euler(rotationX, 0f, 0f);
 
-        transform.Rotate(Vector3.up * lookDelta.x);
+        transform.Rotate(Vector3.up * lookX);
     }
 
     private bool IsGrounded(bool debug = false)

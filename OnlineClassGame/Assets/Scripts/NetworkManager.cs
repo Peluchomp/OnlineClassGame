@@ -19,7 +19,9 @@ public class NetworkManager : MonoBehaviour
         SpawnObjectBroadcastOwned = 4, 
         DestroyObject = 5,
         SceneObjectSync = 6,
-        SpawnRopeAttachments = 7
+        SpawnRopeAttachments = 7,
+        GrabObjectRequest = 8, 
+        GrabObjectUpdate = 9  
     }
     public enum NetworkRole { Server, Client, Host }
     public NetworkRole role = NetworkRole.Host;
@@ -44,10 +46,13 @@ public class NetworkManager : MonoBehaviour
     private Dictionary<object[],EndPoint> pendingServerSpawnRequests = new Dictionary<object[], EndPoint>();
     private List<int> pendingNetIdsToDestroy = new List<int>();
     private List<object[]> pendingRpcCalls = new List<object[]>();
+    private List<object[]> pendingGrabUpdates = new List<object[]>();
 
     Dictionary<int, NetworkIdentity> networkIdentities = new Dictionary<int, NetworkIdentity>();
     Dictionary<string, NetworkIdentity> sceneIdentities = new Dictionary<string, NetworkIdentity>();
     private int nextNetworkId = 1;
+
+    private Dictionary<int, EndPoint> serverObjectOwnership = new Dictionary<int, EndPoint>();
 
     private Socket socket;
     private Thread serverThread;
@@ -90,6 +95,7 @@ public class NetworkManager : MonoBehaviour
                 int newId = nextNetworkId++;
                 identity.SetNetworkId(newId);             
                 networkIdentities[newId] = identity;
+                networkIdentities[newId].isLocalPlayer = true;
             }
         }
         else 
@@ -99,6 +105,7 @@ public class NetworkManager : MonoBehaviour
                 int newId = nextNetworkId++;
                 identity.SetNetworkId(newId);
                 networkIdentities[newId] = identity;
+                networkIdentities[newId].isLocalPlayer = true;
             }
         }
     }
@@ -113,7 +120,6 @@ public class NetworkManager : MonoBehaviour
         serverThread = new Thread(ServerProcess);
         serverThread.Start();
 
-        // Iniciar hilo de descubrimiento
         discoveryThread = new Thread(ServerDiscoveryProcess);
         discoveryThread.Start();
 
@@ -283,6 +289,18 @@ public class NetworkManager : MonoBehaviour
                 pendingRpcCalls.Clear();
             }
         }
+
+        if (pendingGrabUpdates.Count > 0)
+        {
+            lock (pendingGrabUpdates)
+            {
+                foreach (var grabData in pendingGrabUpdates)
+                {
+                    ProcessGrabUpdate(grabData);
+                }
+                pendingGrabUpdates.Clear();
+            }
+        }
     }
     void OnDestroy()
     {
@@ -442,6 +460,40 @@ public class NetworkManager : MonoBehaviour
         {
             var binaryFormatter = new BinaryFormatter();
             binaryFormatter.Serialize(memoryStream, rpcData);
+            return memoryStream.ToArray();
+        }
+    }
+
+    private byte[] SerializeGrabRequest(int objectNetId)
+    {
+        object[] data = new object[]
+        {
+            (byte)MessageType.GrabObjectRequest,
+            objectNetId
+        };
+
+        using (var memoryStream = new MemoryStream())
+        {
+            var binaryFormatter = new BinaryFormatter();
+            binaryFormatter.Serialize(memoryStream, data);
+            return memoryStream.ToArray();
+        }
+    }
+
+    private byte[] SerializeGrabUpdate(int objectNetId, int newOwnerId, bool isNowOwner)
+    {
+        object[] data = new object[]
+        {
+            (byte)MessageType.GrabObjectUpdate,
+            objectNetId,
+            newOwnerId,
+            isNowOwner 
+        };
+
+        using (var memoryStream = new MemoryStream())
+        {
+            var binaryFormatter = new BinaryFormatter();
+            binaryFormatter.Serialize(memoryStream, data);
             return memoryStream.ToArray();
         }
     }
@@ -692,6 +744,23 @@ public class NetworkManager : MonoBehaviour
                         }
                     }
                     break;
+                case MessageType.GrabObjectRequest:
+                    if (role == NetworkRole.Server || role == NetworkRole.Host)
+                    {
+                        int objNetId = (int)rootData[1];
+                        HandleServerGrabRequest(objNetId, sender);
+                    }
+                    break;
+
+                case MessageType.GrabObjectUpdate:
+                    if (role == NetworkRole.Client || role == NetworkRole.Host || role == NetworkRole.Server)
+                    {
+                        lock (pendingGrabUpdates)
+                        {
+                            pendingGrabUpdates.Add(rootData);
+                        }
+                    }
+                    break;
                 case MessageType.SpawnRopeAttachments:
                     lock (pendingRpcCalls)
                     {
@@ -880,6 +949,98 @@ public class NetworkManager : MonoBehaviour
         SpawnRopesForEachPlayer();
     }
 
+    #region GrabLogic [New Section]
+
+    public void ClientRequestGrab(int objectNetworkId)
+    {
+        byte[] requestMsg = SerializeGrabRequest(objectNetworkId);
+        IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
+
+        try
+        {
+            socket.SendTo(requestMsg, serverEp);
+        }
+        catch (SocketException e)
+        {
+            Debug.LogError($"Failed to send Grab Request: {e.Message}");
+        }
+    }
+
+    private void HandleServerGrabRequest(int objectNetId, EndPoint requester)
+    {
+        if (serverObjectOwnership.ContainsKey(objectNetId))
+        {
+            EndPoint currentOwner = serverObjectOwnership[objectNetId];
+            if (!currentOwner.Equals(requester))
+            {
+                Debug.Log($"Grab request denied. Object {objectNetId} is already held by {currentOwner}.");
+                return;
+            }
+        }
+
+        serverObjectOwnership[objectNetId] = requester;
+
+        int newOwnerPlayerId = -1; 
+
+        byte[] msgForOwner = SerializeGrabUpdate(objectNetId, newOwnerPlayerId, true);
+        byte[] msgForOthers = SerializeGrabUpdate(objectNetId, newOwnerPlayerId, false);
+
+        foreach (var clientEp in clientEndpoints)
+        {
+            try
+            {
+                if (clientEp.Equals(requester))
+                {
+                    socket.SendTo(msgForOwner, clientEp);
+                }
+                else
+                {
+                    socket.SendTo(msgForOthers, clientEp);
+                }
+            }
+            catch (SocketException e)
+            {
+                Debug.LogWarning($"Failed to send grab update: {e.Message}");
+            }
+        }
+
+        if (role == NetworkRole.Host)
+        {
+            // The host is also a client. If the requester is not in the list of remote clients,
+            // it must be the host's own client part.
+            bool amITheOwner = !clientEndpoints.Contains(requester);
+
+            object[] grabData = new object[]
+            {
+                (byte)MessageType.GrabObjectUpdate,
+                objectNetId,
+                newOwnerPlayerId,
+                amITheOwner
+            };
+            lock (pendingGrabUpdates)
+            {
+                pendingGrabUpdates.Add(grabData);
+            }
+        }
+
+        Debug.Log($"Object {objectNetId} ownership transferred to {requester}");
+    }
+
+    private void ProcessGrabUpdate(object[] rootData)
+    {
+        int objectNetId = (int)rootData[1];
+        int newOwnerPlayerId = (int)rootData[2];
+        bool amIOwner = (bool)rootData[3];
+
+        if (networkIdentities.TryGetValue(objectNetId, out NetworkIdentity identity))
+        {
+            identity.SetIsLocalPlayer(amIOwner);
+            identity.GetComponent<GrabState>().OnGrabStateUpdated(amIOwner, newOwnerPlayerId);
+            Debug.Log($"Grab Update received for {objectNetId}. Am I owner? {amIOwner}");
+        }
+    }
+
+    #endregion
 
     #region RopeAttachment
     [ContextMenu("Spawn Ropes For All Players")]
