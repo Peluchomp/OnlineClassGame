@@ -12,17 +12,22 @@ public class GrabState : MonoBehaviour
         rb = GetComponent<Rigidbody>();
     }
 
+    private void Start()
+    {
+        var identity = GetComponent<NetworkIdentity>();
+        if (identity != null && !identity.isLocalPlayer)
+        {
+            rb.isKinematic = true;
+        }
+    }
+
     public void OnGrabStateUpdated(bool isMine, int newOwnerId)
     {
-
         this.currentOwnerId = newOwnerId;
 
         if (!isMine)
         {
-           rb.isKinematic = true;
+            rb.isKinematic = true;
         }
-        
-
     }
-
 }

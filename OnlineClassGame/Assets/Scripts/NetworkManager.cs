@@ -52,6 +52,7 @@ public class NetworkManager : MonoBehaviour
     private List<object[]> pendingGrabUpdates = new List<object[]>();
     private List<(int objectNetId, EndPoint requester)> pendingServerGrabRequests = new List<(int, EndPoint)>();
     private List<int> pendingReleaseNetIds = new List<int>();
+    private List<(int objectNetId, EndPoint requester)> pendingServerReleaseRequests = new List<(int, EndPoint)>();
 
     Dictionary<int, NetworkIdentity> networkIdentities = new Dictionary<int, NetworkIdentity>();
     Dictionary<string, NetworkIdentity> sceneIdentities = new Dictionary<string, NetworkIdentity>();
@@ -106,6 +107,11 @@ public class NetworkManager : MonoBehaviour
                 identity.SetNetworkId(newId);             
                 networkIdentities[newId] = identity;
                 networkIdentities[newId].isLocalPlayer = true;
+            }
+
+            if (role == NetworkRole.Client)
+            {
+                identity.isLocalPlayer = false;
             }
         }
         else 
@@ -336,6 +342,18 @@ public class NetworkManager : MonoBehaviour
                     HandleClientReleaseBroadcast(netId);
                 }
                 pendingReleaseNetIds.Clear();
+            }
+        }
+
+        if ((role == NetworkRole.Host || role == NetworkRole.Server) && pendingServerReleaseRequests.Count > 0)
+        {
+            lock (pendingServerReleaseRequests)
+            {
+                foreach (var (objectNetId, requester) in pendingServerReleaseRequests)
+                {
+                    HandleServerReleaseRequest(objectNetId, requester);
+                }
+                pendingServerReleaseRequests.Clear();
             }
         }
     }
@@ -835,9 +853,9 @@ public class NetworkManager : MonoBehaviour
                     if (role == NetworkRole.Server || role == NetworkRole.Host)
                     {
                         int objNetId = (int)rootData[1];
-                        lock (pendingReleaseNetIds)
+                        lock (pendingServerReleaseRequests)
                         {
-                            pendingReleaseNetIds.Add(objNetId);
+                            pendingServerReleaseRequests.Add((objNetId, sender));
                         }
                     }
                     break;

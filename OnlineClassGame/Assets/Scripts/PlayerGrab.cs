@@ -5,19 +5,19 @@ public class PlayerGrabber : MonoBehaviour
     [Header("Settings")]
     [SerializeField] private float grabRange = 3.0f;
     [SerializeField] private LayerMask grabLayer;
-    [SerializeField] private Transform holdPoint; // Assign an empty child object here
+    [SerializeField] private Transform holdPoint;
 
     private NetworkIdentity currentHeldObject;
     private Rigidbody heldRb;
     private Camera playerCamera;
 
+    // Add this flag to prevent dropping while waiting for server response
+    private bool waitingForServerConfirmation = false;
+
     private void Start()
     {
         playerCamera = GetComponentInChildren<Camera>();
-        if (playerCamera == null)
-        {
-            playerCamera = Camera.main;
-        }
+        if (playerCamera == null) playerCamera = Camera.main;
     }
 
     private void Update()
@@ -27,20 +27,16 @@ public class PlayerGrabber : MonoBehaviour
 
         if (Input.GetKeyDown(KeyCode.E))
         {
-            if (currentHeldObject == null)
-            {
-                AttemptGrab();
-            }
-            else
-            {
-                DropObject();
-            }
+            if (currentHeldObject == null) AttemptGrab();
+            else DropObject();
         }
 
         if (currentHeldObject != null)
         {
-            if (currentHeldObject.isLocalPlayer)
+            if (currentHeldObject.isLocalPlayer || waitingForServerConfirmation)
             {
+                if (currentHeldObject.isLocalPlayer) waitingForServerConfirmation = false;
+
                 MoveObjectToHand();
             }
             else
@@ -53,16 +49,13 @@ public class PlayerGrabber : MonoBehaviour
     private void AttemptGrab()
     {
         Ray ray = new Ray(playerCamera.transform.position, playerCamera.transform.forward);
-        RaycastHit hit;
-
-        Debug.DrawRay(ray.origin, ray.direction * grabRange, Color.red, 1f);
-
-        if (Physics.Raycast(ray, out hit, grabRange, grabLayer))
+        if (Physics.Raycast(ray, out RaycastHit hit, grabRange, grabLayer))
         {
             NetworkIdentity targetIdentity = hit.collider.GetComponent<NetworkIdentity>();
-
             if (targetIdentity != null)
             {
+                waitingForServerConfirmation = true;
+
                 NetworkManager.Instance.ClientRequestGrab(targetIdentity.networkId);
 
                 AttachObjectLocally(targetIdentity);
@@ -74,10 +67,9 @@ public class PlayerGrabber : MonoBehaviour
     {
         currentHeldObject = identity;
         heldRb = identity.GetComponent<Rigidbody>();
-
         if (heldRb != null)
         {
-            heldRb.isKinematic = true; 
+            heldRb.isKinematic = true;
             heldRb.useGravity = false;
             heldRb.GetComponent<Collider>().enabled = false;
         }
@@ -99,17 +91,20 @@ public class PlayerGrabber : MonoBehaviour
         {
             heldRb.isKinematic = false;
             heldRb.useGravity = true;
-            heldRb.AddForce(playerCamera.transform.forward * 5f, ForceMode.Impulse);
             heldRb.GetComponent<Collider>().enabled = true;
+
+            heldRb.AddForce(playerCamera.transform.forward * 5f, ForceMode.Impulse);
         }
 
         currentHeldObject = null;
         heldRb = null;
+        waitingForServerConfirmation = false;
     }
 
     private void ForceDrop()
     {
         currentHeldObject = null;
         heldRb = null;
+        waitingForServerConfirmation = false;
     }
 }
