@@ -52,7 +52,7 @@ public class NetworkManager : MonoBehaviour
     private List<object[]> pendingGrabUpdates = new List<object[]>();
     private List<(int objectNetId, EndPoint requester)> pendingServerGrabRequests = new List<(int, EndPoint)>();
     private List<int> pendingReleaseNetIds = new List<int>();
-    private List<(int objectNetId, EndPoint requester)> pendingServerReleaseRequests = new List<(int, EndPoint)>();
+    private List<(int objectNetId, EndPoint requester, Vector3 velocity)> pendingServerReleaseRequests = new List<(int, EndPoint, Vector3)>();
 
     Dictionary<int, NetworkIdentity> networkIdentities = new Dictionary<int, NetworkIdentity>();
     Dictionary<string, NetworkIdentity> sceneIdentities = new Dictionary<string, NetworkIdentity>();
@@ -241,7 +241,7 @@ public class NetworkManager : MonoBehaviour
             }
             catch (SocketException)
             {
-                Debug.LogWarning("No se encontró ningún servidor en la red local.");
+                Debug.LogWarning("No se encontrï¿½ ningï¿½n servidor en la red local.");
             }
         }
     }
@@ -349,9 +349,9 @@ public class NetworkManager : MonoBehaviour
         {
             lock (pendingServerReleaseRequests)
             {
-                foreach (var (objectNetId, requester) in pendingServerReleaseRequests)
+                foreach (var (objectNetId, requester, velocity) in pendingServerReleaseRequests)
                 {
-                    HandleServerReleaseRequest(objectNetId, requester);
+                    HandleServerReleaseRequest(objectNetId, requester, velocity);
                 }
                 pendingServerReleaseRequests.Clear();
             }
@@ -553,12 +553,13 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
-    private byte[] SerializeReleaseRequest(int objectNetId)
+    private byte[] SerializeReleaseRequest(int objectNetId, Vector3 velocity)
     {
         object[] data = new object[]
         {
-            (byte)MessageType.ReleaseObjectRequest,
-            objectNetId
+        (byte)MessageType.ReleaseObjectRequest,
+        objectNetId,
+        velocity.x, velocity.y, velocity.z
         };
         using (var memoryStream = new MemoryStream())
         {
@@ -853,13 +854,15 @@ public class NetworkManager : MonoBehaviour
                     if (role == NetworkRole.Server || role == NetworkRole.Host)
                     {
                         int objNetId = (int)rootData[1];
+                        
+                        Vector3 throwVel = new Vector3((float)rootData[2], (float)rootData[3], (float)rootData[4]);
+
                         lock (pendingServerReleaseRequests)
                         {
-                            pendingServerReleaseRequests.Add((objNetId, sender));
+                            pendingServerReleaseRequests.Add((objNetId, sender, throwVel));
                         }
                     }
                     break;
-
                 case MessageType.ReleaseObjectBroadcast:
                     if (role == NetworkRole.Client || role == NetworkRole.Host || role == NetworkRole.Server)
                     {
@@ -1120,9 +1123,9 @@ public class NetworkManager : MonoBehaviour
             Debug.Log($"Grab Update received for {objectNetId}. Am I owner? {amIOwner}");
         }
     }
-    public void ClientRequestRelease(int objectNetworkId)
+    public void ClientRequestRelease(int objectNetworkId, Vector3 throwVelocity)
     {
-        byte[] requestMsg = SerializeReleaseRequest(objectNetworkId);
+        byte[] requestMsg = SerializeReleaseRequest(objectNetworkId, throwVelocity);
         IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
 
         try
@@ -1135,7 +1138,7 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
-    private void HandleServerReleaseRequest(int objectNetId, EndPoint requester)
+    private void HandleServerReleaseRequest(int objectNetId, EndPoint requester, Vector3 velocity)
     {
         if (serverObjectOwnership.ContainsKey(objectNetId))
         {
@@ -1144,7 +1147,23 @@ public class NetworkManager : MonoBehaviour
             if (currentOwner.Equals(requester))
             {
                 serverObjectOwnership.Remove(objectNetId);
-                Debug.Log($"Object {objectNetId} released by {requester}. Reverting to Server Authority.");
+                Debug.Log($"Object {objectNetId} released by {requester}. Reverting to Server Authority with velocity {velocity}.");
+
+                // 1. Get the identity locally on the server
+                if (networkIdentities.TryGetValue(objectNetId, out NetworkIdentity identity))
+                {
+                    // 2. Take ownership back
+                    identity.SetIsLocalPlayer(true);
+
+                    // 3. Enable Physics and APPLY VELOCITY
+                    Rigidbody rb = identity.GetComponent<Rigidbody>();
+                    if (rb != null)
+                    {
+                        rb.isKinematic = false;
+                        rb.useGravity = true;
+                        rb.linearVelocity = velocity; // <--- The magic fix
+                    }
+                }
 
                 BroadcastRelease(objectNetId);
             }

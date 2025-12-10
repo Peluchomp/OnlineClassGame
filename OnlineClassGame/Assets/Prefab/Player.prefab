@@ -457,6 +457,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerInput
   playerMovement: {fileID: 7078348922222171603}
   minerScript: {fileID: 7621773512296133922}
+  grabScript: {fileID: 5710319050303897888}
 --- !u!114 &7078348922222171603
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -7,6 +7,7 @@ public class PlayerInput : MonoBehaviour
 
     [SerializeField] PlayerMovement playerMovement;
     [SerializeField] MinerScript minerScript;
+    [SerializeField] PlayerGrabber grabScript;
 
     private void Awake()
     {
@@ -21,6 +22,7 @@ public class PlayerInput : MonoBehaviour
         PlayerMovementInput();
         PlayerLookInput();
         PlayerMineInput();
+        PlayerGrabInput();
     }
 
     private void OnEnable()
@@ -49,6 +51,14 @@ public class PlayerInput : MonoBehaviour
 
     }
 
+    public void PlayerGrabInput()
+    {
+        if (Input.GetKeyDown(KeyCode.E))
+        {
+            Debug.Log("Interact pressed");
+            grabScript.HandleInput();
+        }
+    }
     public void PlayerLookInput()
     {
         Vector2 lookInput = _gameControls.Player.Look.ReadValue<Vector2>();

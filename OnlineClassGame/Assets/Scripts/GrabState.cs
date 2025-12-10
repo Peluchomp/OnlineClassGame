@@ -14,6 +14,19 @@ public class GrabState : MonoBehaviour
 
     private void Start()
     {
+        NetworkManager.Instance.OnServerStarted += Initialize;
+    }
+
+    private void OnDisable()
+    {
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.OnServerStarted -= Initialize;
+        }
+    }
+
+    private void Initialize()
+    {
         var identity = GetComponent<NetworkIdentity>();
         if (identity != null && !identity.isLocalPlayer)
         {

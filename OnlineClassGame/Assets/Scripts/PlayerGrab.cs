@@ -11,7 +11,6 @@ public class PlayerGrabber : MonoBehaviour
     private Rigidbody heldRb;
     private Camera playerCamera;
 
-    // Add this flag to prevent dropping while waiting for server response
     private bool waitingForServerConfirmation = false;
 
     private void Start()
@@ -24,12 +23,6 @@ public class PlayerGrabber : MonoBehaviour
     {
         var myIdentity = GetComponent<NetworkIdentity>();
         if (myIdentity != null && !myIdentity.isLocalPlayer) return;
-
-        if (Input.GetKeyDown(KeyCode.E))
-        {
-            if (currentHeldObject == null) AttemptGrab();
-            else DropObject();
-        }
 
         if (currentHeldObject != null)
         {
@@ -44,6 +37,12 @@ public class PlayerGrabber : MonoBehaviour
                 ForceDrop();
             }
         }
+    }
+
+    public void HandleInput()
+    {
+        if (currentHeldObject == null) AttemptGrab();
+        else DropObject();
     }
 
     private void AttemptGrab()
@@ -85,7 +84,9 @@ public class PlayerGrabber : MonoBehaviour
     {
         if (currentHeldObject == null) return;
 
-        NetworkManager.Instance.ClientRequestRelease(currentHeldObject.networkId);
+        Vector3 throwVelocity = playerCamera.transform.forward * 5f;
+
+        NetworkManager.Instance.ClientRequestRelease(currentHeldObject.networkId, throwVelocity);
 
         if (heldRb != null)
         {
@@ -93,7 +94,7 @@ public class PlayerGrabber : MonoBehaviour
             heldRb.useGravity = true;
             heldRb.GetComponent<Collider>().enabled = true;
 
-            heldRb.AddForce(playerCamera.transform.forward * 5f, ForceMode.Impulse);
+            heldRb.linearVelocity = throwVelocity;
         }
 
         currentHeldObject = null;
