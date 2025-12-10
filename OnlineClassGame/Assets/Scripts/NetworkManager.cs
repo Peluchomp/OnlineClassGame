@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -21,7 +22,9 @@ public class NetworkManager : MonoBehaviour
         SceneObjectSync = 6,
         SpawnRopeAttachments = 7,
         GrabObjectRequest = 8, 
-        GrabObjectUpdate = 9  
+        GrabObjectUpdate = 9,
+        ReleaseObjectRequest = 10, 
+        ReleaseObjectBroadcast = 11
     }
     public enum NetworkRole { Server, Client, Host }
     public NetworkRole role = NetworkRole.Host;
@@ -47,6 +50,8 @@ public class NetworkManager : MonoBehaviour
     private List<int> pendingNetIdsToDestroy = new List<int>();
     private List<object[]> pendingRpcCalls = new List<object[]>();
     private List<object[]> pendingGrabUpdates = new List<object[]>();
+    private List<(int objectNetId, EndPoint requester)> pendingServerGrabRequests = new List<(int, EndPoint)>();
+    private List<int> pendingReleaseNetIds = new List<int>();
 
     Dictionary<int, NetworkIdentity> networkIdentities = new Dictionary<int, NetworkIdentity>();
     Dictionary<string, NetworkIdentity> sceneIdentities = new Dictionary<string, NetworkIdentity>();
@@ -54,12 +59,16 @@ public class NetworkManager : MonoBehaviour
 
     private Dictionary<int, EndPoint> serverObjectOwnership = new Dictionary<int, EndPoint>();
 
+
     private Socket socket;
     private Thread serverThread;
     private Thread clientThread;
     private volatile bool m_cancel = false;
 
     private HashSet<EndPoint> clientEndpoints = new HashSet<EndPoint>();
+
+    public event Action OnServerStarted;
+    public event Action OnClientStarted;
 
     private void Awake()
     {
@@ -76,6 +85,7 @@ public class NetworkManager : MonoBehaviour
 
     public void RegisterIdentity(NetworkIdentity identity)
     {
+        Debug.Log("Registering NetworkIdentity: " + identity.gameObject.name);
         if (identity == null) return;
 
         if (identity.networkId != 0 && networkIdentities.ContainsKey(identity.networkId))
@@ -124,6 +134,8 @@ public class NetworkManager : MonoBehaviour
         discoveryThread.Start();
 
         Debug.Log("Servidor UDP (Binario) iniciado en el puerto " + port);
+
+        OnServerStarted?.Invoke();
     }
 
     public void StartClient()
@@ -137,7 +149,8 @@ public class NetworkManager : MonoBehaviour
         }
         clientThread = new Thread(ClientProcess);
         clientThread.Start();
-       
+
+        OnClientStarted?.Invoke();
     }
 
     public void StartHost()
@@ -266,6 +279,18 @@ public class NetworkManager : MonoBehaviour
             }
         }
 
+        if ((role == NetworkRole.Host || role == NetworkRole.Server) && pendingServerGrabRequests.Count > 0)
+        {
+            lock (pendingServerGrabRequests)
+            {
+                foreach (var (objectNetId, requester) in pendingServerGrabRequests)
+                {
+                    HandleServerGrabRequest(objectNetId, requester);
+                }
+                pendingServerGrabRequests.Clear();
+            }
+        }
+
         if (pendingNetIdsToDestroy.Count > 0)
         {
             lock (pendingNetIdsToDestroy)
@@ -299,6 +324,18 @@ public class NetworkManager : MonoBehaviour
                     ProcessGrabUpdate(grabData);
                 }
                 pendingGrabUpdates.Clear();
+            }
+        }
+
+        if (pendingReleaseNetIds.Count > 0)
+        {
+            lock (pendingReleaseNetIds)
+            {
+                foreach (var netId in pendingReleaseNetIds)
+                {
+                    HandleClientReleaseBroadcast(netId);
+                }
+                pendingReleaseNetIds.Clear();
             }
         }
     }
@@ -490,6 +527,36 @@ public class NetworkManager : MonoBehaviour
             isNowOwner 
         };
 
+        using (var memoryStream = new MemoryStream())
+        {
+            var binaryFormatter = new BinaryFormatter();
+            binaryFormatter.Serialize(memoryStream, data);
+            return memoryStream.ToArray();
+        }
+    }
+
+    private byte[] SerializeReleaseRequest(int objectNetId)
+    {
+        object[] data = new object[]
+        {
+            (byte)MessageType.ReleaseObjectRequest,
+            objectNetId
+        };
+        using (var memoryStream = new MemoryStream())
+        {
+            var binaryFormatter = new BinaryFormatter();
+            binaryFormatter.Serialize(memoryStream, data);
+            return memoryStream.ToArray();
+        }
+    }
+
+    private byte[] SerializeReleaseBroadcast(int objectNetId)
+    {
+        object[] data = new object[]
+        {
+            (byte)MessageType.ReleaseObjectBroadcast,
+            objectNetId
+        };
         using (var memoryStream = new MemoryStream())
         {
             var binaryFormatter = new BinaryFormatter();
@@ -748,7 +815,10 @@ public class NetworkManager : MonoBehaviour
                     if (role == NetworkRole.Server || role == NetworkRole.Host)
                     {
                         int objNetId = (int)rootData[1];
-                        HandleServerGrabRequest(objNetId, sender);
+                        lock (pendingServerGrabRequests)
+                        {
+                            pendingServerGrabRequests.Add((objNetId, sender));
+                        }
                     }
                     break;
 
@@ -758,6 +828,27 @@ public class NetworkManager : MonoBehaviour
                         lock (pendingGrabUpdates)
                         {
                             pendingGrabUpdates.Add(rootData);
+                        }
+                    }
+                    break;
+                case MessageType.ReleaseObjectRequest:
+                    if (role == NetworkRole.Server || role == NetworkRole.Host)
+                    {
+                        int objNetId = (int)rootData[1];
+                        lock (pendingReleaseNetIds)
+                        {
+                            pendingReleaseNetIds.Add(objNetId);
+                        }
+                    }
+                    break;
+
+                case MessageType.ReleaseObjectBroadcast:
+                    if (role == NetworkRole.Client || role == NetworkRole.Host || role == NetworkRole.Server)
+                    {
+                        int objNetId = (int)rootData[1];
+                        lock (pendingReleaseNetIds)
+                        {
+                            pendingReleaseNetIds.Add(objNetId);
                         }
                     }
                     break;
@@ -973,57 +1064,28 @@ public class NetworkManager : MonoBehaviour
             EndPoint currentOwner = serverObjectOwnership[objectNetId];
             if (!currentOwner.Equals(requester))
             {
-                Debug.Log($"Grab request denied. Object {objectNetId} is already held by {currentOwner}.");
+                Debug.Log($"Grab denied. Object {objectNetId} is held by {currentOwner}.");
                 return;
             }
         }
 
         serverObjectOwnership[objectNetId] = requester;
 
-        int newOwnerPlayerId = -1; 
-
-        byte[] msgForOwner = SerializeGrabUpdate(objectNetId, newOwnerPlayerId, true);
-        byte[] msgForOthers = SerializeGrabUpdate(objectNetId, newOwnerPlayerId, false);
+        int newOwnerPlayerId = -1;
 
         foreach (var clientEp in clientEndpoints)
         {
+            bool isOwner = clientEp.Equals(requester);
+            byte[] msg = SerializeGrabUpdate(objectNetId, newOwnerPlayerId, isOwner);
             try
             {
-                if (clientEp.Equals(requester))
-                {
-                    socket.SendTo(msgForOwner, clientEp);
-                }
-                else
-                {
-                    socket.SendTo(msgForOthers, clientEp);
-                }
+                socket.SendTo(msg, clientEp);
             }
             catch (SocketException e)
             {
-                Debug.LogWarning($"Failed to send grab update: {e.Message}");
+                Debug.LogWarning($"Failed to send GrabUpdate to {clientEp}: {e.Message}");
             }
         }
-
-        if (role == NetworkRole.Host)
-        {
-            // The host is also a client. If the requester is not in the list of remote clients,
-            // it must be the host's own client part.
-            bool amITheOwner = !clientEndpoints.Contains(requester);
-
-            object[] grabData = new object[]
-            {
-                (byte)MessageType.GrabObjectUpdate,
-                objectNetId,
-                newOwnerPlayerId,
-                amITheOwner
-            };
-            lock (pendingGrabUpdates)
-            {
-                pendingGrabUpdates.Add(grabData);
-            }
-        }
-
-        Debug.Log($"Object {objectNetId} ownership transferred to {requester}");
     }
 
     private void ProcessGrabUpdate(object[] rootData)
@@ -1031,12 +1093,88 @@ public class NetworkManager : MonoBehaviour
         int objectNetId = (int)rootData[1];
         int newOwnerPlayerId = (int)rootData[2];
         bool amIOwner = (bool)rootData[3];
-
+        Debug.Log("ProcessingUpdateNow im owner?: " + amIOwner);
         if (networkIdentities.TryGetValue(objectNetId, out NetworkIdentity identity))
         {
             identity.SetIsLocalPlayer(amIOwner);
             identity.GetComponent<GrabState>().OnGrabStateUpdated(amIOwner, newOwnerPlayerId);
+
             Debug.Log($"Grab Update received for {objectNetId}. Am I owner? {amIOwner}");
+        }
+    }
+    public void ClientRequestRelease(int objectNetworkId)
+    {
+        byte[] requestMsg = SerializeReleaseRequest(objectNetworkId);
+        IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
+
+        try
+        {
+            socket.SendTo(requestMsg, serverEp);
+        }
+        catch (SocketException e)
+        {
+            Debug.LogError($"Failed to send Release Request: {e.Message}");
+        }
+    }
+
+    private void HandleServerReleaseRequest(int objectNetId, EndPoint requester)
+    {
+        if (serverObjectOwnership.ContainsKey(objectNetId))
+        {
+            EndPoint currentOwner = serverObjectOwnership[objectNetId];
+
+            if (currentOwner.Equals(requester))
+            {
+                serverObjectOwnership.Remove(objectNetId);
+                Debug.Log($"Object {objectNetId} released by {requester}. Reverting to Server Authority.");
+
+                BroadcastRelease(objectNetId);
+            }
+        }
+    }
+
+    private void BroadcastRelease(int objectNetId)
+    {
+        byte[] releaseMsg = SerializeReleaseBroadcast(objectNetId);
+        foreach (var ep in clientEndpoints)
+        {
+            try { socket.SendTo(releaseMsg, ep); } catch { }
+        }
+
+        if (role == NetworkRole.Host || role == NetworkRole.Server)
+        {
+            lock (pendingReleaseNetIds)
+            {
+                pendingReleaseNetIds.Add(objectNetId);
+            }
+        }
+    }
+    private void HandleClientReleaseBroadcast(int objectNetId)
+    {
+        if (networkIdentities.TryGetValue(objectNetId, out NetworkIdentity identity))
+        {
+           
+            if (role == NetworkRole.Server || role == NetworkRole.Host)
+            {
+                identity.SetIsLocalPlayer(true);
+
+                var rb = identity.GetComponent<Rigidbody>();
+                if (rb != null)
+                {
+                    rb.isKinematic = false;
+                    rb.useGravity = true;
+                }
+            }
+            else
+            {
+                identity.SetIsLocalPlayer(false);
+                Debug.Log("Releasing object on client, setting isLocalPlayer to false.");
+                var rb = identity.GetComponent<Rigidbody>();
+                if (rb != null) rb.isKinematic = true;
+            }
+
+            var grabState = identity.GetComponent<GrabState>();
+            if (grabState != null) grabState.OnGrabStateUpdated(identity.isLocalPlayer, -1);
         }
     }
 

@@ -70,7 +70,7 @@ public class PlayerGrabber : MonoBehaviour
         }
     }
 
-    private void AttachObjectLocally(NetworkIdentity identity)
+    public void AttachObjectLocally(NetworkIdentity identity)
     {
         currentHeldObject = identity;
         heldRb = identity.GetComponent<Rigidbody>();
@@ -79,6 +79,7 @@ public class PlayerGrabber : MonoBehaviour
         {
             heldRb.isKinematic = true; 
             heldRb.useGravity = false;
+            heldRb.GetComponent<Collider>().enabled = false;
         }
     }
 
@@ -92,11 +93,14 @@ public class PlayerGrabber : MonoBehaviour
     {
         if (currentHeldObject == null) return;
 
+        NetworkManager.Instance.ClientRequestRelease(currentHeldObject.networkId);
+
         if (heldRb != null)
         {
             heldRb.isKinematic = false;
             heldRb.useGravity = true;
             heldRb.AddForce(playerCamera.transform.forward * 5f, ForceMode.Impulse);
+            heldRb.GetComponent<Collider>().enabled = true;
         }
 
         currentHeldObject = null;

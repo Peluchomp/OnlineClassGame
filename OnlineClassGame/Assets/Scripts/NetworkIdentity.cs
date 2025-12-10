@@ -23,10 +23,40 @@ public class NetworkIdentity : MonoBehaviour
         m_sceneId = System.Guid.NewGuid().ToString();
     }
 
+    void OnEnable()
+    {
+       
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.OnServerStarted += RegisterSelf;
+            NetworkManager.Instance.OnClientStarted += RegisterSelf;
+        }
+    }
+
     private void Start()
     {
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.OnServerStarted += RegisterSelf;
+            NetworkManager.Instance.OnClientStarted += RegisterSelf;
+        }
+    }
+
+    void OnDisable()
+    {
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.OnServerStarted -= RegisterSelf;
+            NetworkManager.Instance.OnClientStarted -= RegisterSelf;
+        }
+    }
+
+    private void RegisterSelf()
+    {
+        Debug.Log($"Registering NetworkIdentity with SceneID: {m_sceneId}");
         NetworkManager.Instance.RegisterIdentity(this);
     }
+
 
     public void SetNetworkId(int id)
     {

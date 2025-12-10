@@ -18635,7 +18635,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::NetworkIdentity
   m_sceneId: aa55ab65-153a-4418-a98e-c25ea56a1b6c
   networkId: 0
-  isLocalPlayer: 0
+  isLocalPlayer: 1
 --- !u!4 &1691286902
 Transform:
   m_ObjectHideFlags: 0
