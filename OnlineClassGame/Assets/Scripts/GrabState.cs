@@ -1,3 +1,4 @@
+using System.Security.Principal;
 using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody))]
@@ -6,15 +7,24 @@ public class GrabState : MonoBehaviour
 {
     Rigidbody rb;
     public int currentOwnerId = -1;
-
+    NetworkIdentity identity;
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
+        identity = GetComponent<NetworkIdentity>();
     }
 
     private void Start()
     {
         NetworkManager.Instance.OnServerStarted += Initialize;
+        if (identity != null && identity.isLocalPlayer)
+        {
+            rb.isKinematic = false;
+        }
+        else
+        {
+            rb.isKinematic = true;
+        }
     }
 
     private void OnDisable()
@@ -27,8 +37,10 @@ public class GrabState : MonoBehaviour
 
     private void Initialize()
     {
-        var identity = GetComponent<NetworkIdentity>();
-        if (identity != null && !identity.isLocalPlayer)
+        if (identity != null && identity.isLocalPlayer)
+        {
+            rb.isKinematic = false;
+        }else
         {
             rb.isKinematic = true;
         }

@@ -16,7 +16,7 @@ public class NetworkTransform : MonoBehaviour
     public Vector3 netwScale;
 
     // Thresholds
-    private float positionThreshold = 0.01f;
+    private float positionThreshold = 0.005f;
     private float rotationThreshold = 0.5f;
     private float scaleThreshold = 0.01f;
 
@@ -69,6 +69,7 @@ public class NetworkTransform : MonoBehaviour
                 lastRotation = transform.rotation;
                 lastScale = transform.localScale;
             }
+            sendData = true;
         }
     }
 
