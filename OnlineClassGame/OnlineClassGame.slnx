@@ -1,0 +1,6 @@
+﻿<Solution>
+  <Project Path="Obi.csproj" />
+  <Project Path="Assembly-CSharp.csproj" />
+  <Project Path="Obi.Editor.csproj" />
+  <Project Path="Assembly-CSharp-Editor.csproj" />
+</Solution>

@@ -24,7 +24,10 @@ public class NetworkManager : MonoBehaviour
         GrabObjectRequest = 8, 
         GrabObjectUpdate = 9,
         ReleaseObjectRequest = 10, 
-        ReleaseObjectBroadcast = 11
+        ReleaseObjectBroadcast = 11,
+        Ack = 12,
+        TimeSyncRequest = 13,
+        TimeSyncResponse = 14
     }
     public enum NetworkRole { Server, Client, Host }
     public NetworkRole role = NetworkRole.Host;
@@ -37,11 +40,10 @@ public class NetworkManager : MonoBehaviour
     private Thread discoveryThread;
     private const int discoveryPort = 9051;
 
+    private double clientTimeOffset = 0.0;
+
     // will move it away from networkManager on a later delivery
     public Transform fixedRopeAnchor;
-
-    [HideInInspector]
-    public int connectedClientsCount => clientEndpoints.Count;
 
     public List<GameObject> spawnablePrefabs = new List<GameObject>();
 
@@ -60,13 +62,23 @@ public class NetworkManager : MonoBehaviour
 
     private Dictionary<int, EndPoint> serverObjectOwnership = new Dictionary<int, EndPoint>();
 
+    private int localSequenceId = 0;
+    private float resendTimeout = 1.0f;
+    private List<PendingPacket> pendingAckPackets = new List<PendingPacket>();
+
+    private Dictionary<System.Net.EndPoint, int> latestSequenceReceived = new Dictionary<System.Net.EndPoint, int>();
 
     private Socket socket;
     private Thread serverThread;
     private Thread clientThread;
     private volatile bool m_cancel = false;
+    private object sequenceLock = new object();
 
-    private HashSet<EndPoint> clientEndpoints = new HashSet<EndPoint>();
+    private Dictionary<EndPoint, ClientConnection> clientConnections = new Dictionary<EndPoint, ClientConnection>();
+    private int nextConnectionId = 1;
+
+    [HideInInspector]
+    public int connectedClientsCount => clientConnections.Count;
 
     public event Action OnServerStarted;
     public event Action OnClientStarted;
@@ -157,6 +169,21 @@ public class NetworkManager : MonoBehaviour
         clientThread.Start();
 
         OnClientStarted?.Invoke();
+
+        StartCoroutine(SyncClockLoop());
+    }
+
+    private IEnumerator SyncClockLoop()
+    {
+        while (!m_cancel)
+        {
+            if (socket != null)
+            {
+                SendTimeSyncRequest();
+            }
+
+            yield return new WaitForSeconds(5.0f);
+        }
     }
 
     public void StartHost()
@@ -356,6 +383,35 @@ public class NetworkManager : MonoBehaviour
                 pendingServerReleaseRequests.Clear();
             }
         }
+
+        lock (pendingAckPackets)
+        {
+            for (int i = pendingAckPackets.Count - 1; i >= 0; i--)
+            {
+                var packet = pendingAckPackets[i];
+
+                if ((float)NetTimer.GetTime() - packet.sendTime > resendTimeout)
+                {
+                    if (packet.retryCount > 5)
+                    {
+                        Debug.LogWarning($"Packet {packet.sequenceId} dropped after 5 retries.");
+                        pendingAckPackets.RemoveAt(i);
+                        continue;
+                    }
+
+                    try
+                    {
+                        socket.SendTo(packet.serializedData, packet.target);
+                        Debug.Log($"Resending packet {packet.sequenceId} to {packet.target}");
+                    }
+                    catch { }
+
+                    packet.sendTime = (float)NetTimer.GetTime();
+                    packet.retryCount++;
+                }
+            }
+        }
+
     }
     void OnDestroy()
     {
@@ -374,9 +430,9 @@ public class NetworkManager : MonoBehaviour
 
     #region SerializeNetworkMessages
 
-    private byte[] SerializeSpawnBroadcast(int prefabId, int networkId, Vector3 pos, Quaternion rot, MessageType messageType)
+    private object[] GetSpawnBroadcastData(int prefabId, int networkId, Vector3 pos, Quaternion rot, MessageType messageType)
     {
-        object[] data = new object[]
+        return new object[]
         {
             (byte)messageType,
             prefabId,
@@ -384,16 +440,9 @@ public class NetworkManager : MonoBehaviour
             pos.x, pos.y, pos.z,
             rot.x, rot.y, rot.z, rot.w
         };
-
-        using (var memoryStream = new MemoryStream())
-        {
-            var binaryFormatter = new BinaryFormatter();
-            binaryFormatter.Serialize(memoryStream, data);
-            return memoryStream.ToArray();
-        }
     }
 
-    private byte[] SerializeTransformsBinary()
+    private object[] GetTransformsData()
     {
         var ids = new List<int>();
         var floats = new List<float>();
@@ -430,67 +479,39 @@ public class NetworkManager : MonoBehaviour
             }
         }
 
-        var data = new object[] { (byte)MessageType.TransformSync, sceneSyncs, ids, floats };
-
-        using (var memoryStream = new MemoryStream())
-        {
-            var binaryFormatter = new BinaryFormatter();
-            binaryFormatter.Serialize(memoryStream, data);
-            return memoryStream.ToArray();
-        }
+        return new object[] { (byte)MessageType.TransformSync, sceneSyncs, ids, floats };
     }
 
-    private byte[] SerializeSpawnRequest(int prefabId, Vector3 pos, Quaternion rot)
+    private object[] GetSpawnRequestData(int prefabId, Vector3 pos, Quaternion rot)
     {
-        object[] data = new object[]
+        return new object[]
         {
             (byte)MessageType.SpawnObjectRequest,
             prefabId,
             pos.x, pos.y, pos.z,
             rot.x, rot.y, rot.z, rot.w
         };
-
-        using (var memoryStream = new MemoryStream())
-        {
-            var binaryFormatter = new BinaryFormatter();
-            binaryFormatter.Serialize(memoryStream, data);
-            return memoryStream.ToArray();
-        }
     }
 
-    private byte[] SerializeDestroyObject(int networkId)
+    private object[] GetDestroyObjectData(int networkId)
     {
-        object[] data = new object[]
+        return new object[]
         {
         (byte)MessageType.DestroyObject,
         networkId
         };
-
-        using (var memoryStream = new MemoryStream())
-        {
-            var binaryFormatter = new BinaryFormatter();
-            binaryFormatter.Serialize(memoryStream, data);
-            return memoryStream.ToArray();
-        }
     }
 
-    private byte[] SerializeDestroyRequest(int networkId)
+    private object[] GetDestroyRequestData(int networkId)
     {
-        object[] data = new object[]
+        return new object[]
         {
         (byte)MessageType.DestroyObject,
         networkId
         };
-
-        using (var memoryStream = new MemoryStream())
-        {
-            var binaryFormatter = new BinaryFormatter();
-            binaryFormatter.Serialize(memoryStream, data);
-            return memoryStream.ToArray();
-        }
     }
 
-    private byte[] SerializeSceneObjectsSync()
+    private object[] GetSceneObjectsSyncData()
     {
         var sceneSyncs = new List<object[]>();
         foreach (var kvp in sceneIdentities)
@@ -500,88 +521,46 @@ public class NetworkManager : MonoBehaviour
                 sceneSyncs.Add(new object[] { kvp.Key, kvp.Value.networkId });
             }
         }
-        object[] data = new object[] { (byte)MessageType.SceneObjectSync, sceneSyncs };
-        using (var memoryStream = new MemoryStream())
-        {
-            var binaryFormatter = new BinaryFormatter();
-            binaryFormatter.Serialize(memoryStream, data);
-            return memoryStream.ToArray();
-        }
+        return new object[] { (byte)MessageType.SceneObjectSync, sceneSyncs };
     }
 
-    private byte[] SerializeRpc(object[] rpcData)
+    private object[] GetGrabRequestData(int objectNetId)
     {
-        using (var memoryStream = new MemoryStream())
-        {
-            var binaryFormatter = new BinaryFormatter();
-            binaryFormatter.Serialize(memoryStream, rpcData);
-            return memoryStream.ToArray();
-        }
-    }
-
-    private byte[] SerializeGrabRequest(int objectNetId)
-    {
-        object[] data = new object[]
+        return new object[]
         {
             (byte)MessageType.GrabObjectRequest,
             objectNetId
         };
-
-        using (var memoryStream = new MemoryStream())
-        {
-            var binaryFormatter = new BinaryFormatter();
-            binaryFormatter.Serialize(memoryStream, data);
-            return memoryStream.ToArray();
-        }
     }
 
-    private byte[] SerializeGrabUpdate(int objectNetId, int newOwnerId, bool isNowOwner)
+    private object[] GetGrabUpdateData(int objectNetId, int newOwnerId, bool isNowOwner)
     {
-        object[] data = new object[]
+        return new object[]
         {
             (byte)MessageType.GrabObjectUpdate,
             objectNetId,
             newOwnerId,
             isNowOwner 
         };
-
-        using (var memoryStream = new MemoryStream())
-        {
-            var binaryFormatter = new BinaryFormatter();
-            binaryFormatter.Serialize(memoryStream, data);
-            return memoryStream.ToArray();
-        }
     }
 
-    private byte[] SerializeReleaseRequest(int objectNetId, Vector3 velocity)
+    private object[] GetReleaseRequestData(int objectNetId, Vector3 velocity)
     {
-        object[] data = new object[]
+        return new object[]
         {
         (byte)MessageType.ReleaseObjectRequest,
         objectNetId,
         velocity.x, velocity.y, velocity.z
         };
-        using (var memoryStream = new MemoryStream())
-        {
-            var binaryFormatter = new BinaryFormatter();
-            binaryFormatter.Serialize(memoryStream, data);
-            return memoryStream.ToArray();
-        }
     }
 
-    private byte[] SerializeReleaseBroadcast(int objectNetId)
+    private object[] GetReleaseBroadcastData(int objectNetId)
     {
-        object[] data = new object[]
+        return new object[]
         {
             (byte)MessageType.ReleaseObjectBroadcast,
             objectNetId
         };
-        using (var memoryStream = new MemoryStream())
-        {
-            var binaryFormatter = new BinaryFormatter();
-            binaryFormatter.Serialize(memoryStream, data);
-            return memoryStream.ToArray();
-        }
     }
 
     #endregion
@@ -607,11 +586,15 @@ public class NetworkManager : MonoBehaviour
         Debug.Log("Spawning player for server/host.");
         ServerSpawnAndBroadcast(playerPrefabId, spawnPosition, Quaternion.identity, null);
 
-        foreach (var clientEndPoint in clientEndpoints)
+        foreach (var clientProxy in clientConnections.Values)
         {
-            Debug.Log($"Spawning player for client {clientEndPoint}.");
+            if (clientProxy.PlayerIdentity != null) continue;
 
-            ServerSpawnAndBroadcast(playerPrefabId, spawnPosition, Quaternion.identity, clientEndPoint);
+            Debug.Log($"Spawning player for client {clientProxy.ConnectionId}.");
+
+            NetworkIdentity newPlayer = ServerSpawnAndBroadcast(playerPrefabId, spawnPosition, Quaternion.identity, clientProxy.EndPoint);
+
+            clientProxy.PlayerIdentity = newPlayer;
         }
     }
 
@@ -640,25 +623,24 @@ public class NetworkManager : MonoBehaviour
 
         identity.SetIsLocalPlayer(owner == null);
 
-        byte[] spawnMessageRemote = SerializeSpawnBroadcast(prefabId, identity.networkId, position, rotation, MessageType.SpawnObjectBroadcast);
-        byte[] spawnMessageOwned = SerializeSpawnBroadcast(prefabId, identity.networkId, position, rotation, MessageType.SpawnObjectBroadcastOwned);
-
-        foreach (var ep in clientEndpoints)
+        foreach (var clientProxy in clientConnections.Values)
         {
             try
             {
-                if (owner != null && ep.Equals(owner))
+                if (owner != null && clientProxy.EndPoint.Equals(owner))
                 {
-                    socket.SendTo(spawnMessageOwned, ep);
+                    object[] rootData = GetSpawnBroadcastData(prefabId, identity.networkId, position, rotation, MessageType.SpawnObjectBroadcastOwned);
+                    SendNetworkMessage(rootData, clientProxy.EndPoint, true);
                 }
                 else
                 {
-                    socket.SendTo(spawnMessageRemote, ep);
+                    object[] rootData = GetSpawnBroadcastData(prefabId, identity.networkId, position, rotation, MessageType.SpawnObjectBroadcast);
+                    SendNetworkMessage(rootData, clientProxy.EndPoint, true);
                 }
             }
             catch (SocketException e)
             {
-                Debug.LogWarning($"Failed to send spawn broadcast to {ep}: {e.Message}");
+                Debug.LogWarning($"Failed to send spawn broadcast to {clientProxy.EndPoint}: {e.Message}");
             }
         }
         Debug.Log($"Spawned and broadcasted object {prefab.name} with NetworkId {identity.networkId}. Owner: {(owner == null ? "Server" : owner.ToString())}");
@@ -684,17 +666,10 @@ public class NetworkManager : MonoBehaviour
     {
         if (role == NetworkRole.Server) return;
 
-        byte[] requestMessage = SerializeSpawnRequest(prefabId, position, rotation);
+        object[] requestMessage = GetSpawnRequestData(prefabId, position, rotation);
         IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
 
-        try
-        {
-            socket.SendTo(requestMessage, serverEp);
-        }
-        catch (SocketException e)
-        {
-            Debug.LogError($"Failed to send spawn request: {e.Message}");
-        }
+        SendNetworkMessage(requestMessage, serverEp, true);
     }
 
     private void ClientHandleSpawnBroadcast(object[] rootData)
@@ -747,143 +722,266 @@ public class NetworkManager : MonoBehaviour
     {
         try
         {
-            var memoryStream = new MemoryStream(data, 0, length);
-            var binaryFormatter = new BinaryFormatter();
-            object[] rootData = (object[])binaryFormatter.Deserialize(memoryStream);
+            object[] wrapper = DeserializePacketWrapper(data);
 
-            if (rootData == null || rootData.Length == 0)
-                return;
+            int sequenceId = (int)wrapper[0];
+            float serverTime = (float)wrapper[1];
+            bool isReliable = (bool)wrapper[2];
+            object[] payload = (object[])wrapper[3];
 
-            if (!clientEndpoints.Contains(sender))
+            if (isReliable)
             {
-                clientEndpoints.Add(sender);
-                Debug.Log("Nuevo cliente conectado: " + sender.ToString());
-
-                byte[] sceneSyncMsg = SerializeSceneObjectsSync();
-                socket.SendTo(sceneSyncMsg, sender);
+                SendAck(sequenceId, sender);
             }
 
-            MessageType messageType = (MessageType)(byte)rootData[0];
-
-            switch (messageType)
+            MessageType msgType = (MessageType)(byte)payload[0];
+            if (msgType == MessageType.Ack)
             {
-                case MessageType.TransformSync:
-                    if (role != NetworkRole.Client)
-                    {
-                        ApplyTransformSync(rootData);
+                int ackSeqId = (int)payload[1];
+                lock (pendingAckPackets)
+                {
+                    Debug.Log($"Received ACK for packet {ackSeqId} from {sender}");
 
-                        byte[] response = SerializeTransformsBinary();
-                        socket.SendTo(response, sender);
-                    }
-                    else
-                    {
-                        ApplyTransformSync(rootData);
-                    }
-                    break;
-
-                case MessageType.SpawnObjectBroadcast:
-                case MessageType.SpawnObjectBroadcastOwned:
-                    if (role != NetworkRole.Server)
-                    {
-                        lock (pendingSpawnRequests)
-                        {
-                            pendingSpawnRequests.Add(rootData);
-                        }
-                    }
-                    break;
-
-                case MessageType.SpawnObjectRequest:
-                    if (role != NetworkRole.Client)
-                    {
-                        lock (pendingServerSpawnRequests)
-                        {
-                            pendingServerSpawnRequests[rootData] = sender;
-                        }
-                    }
-                    break;
-                case MessageType.DestroyObject:
-
-                    int networkIdToDestroy = (int)rootData[1];
-                    if (role == NetworkRole.Server || role == NetworkRole.Host)
-                    {
-                        BroadcastDestroyObject(networkIdToDestroy);
-                    }
-                    else if (role == NetworkRole.Client)
-                    {
-                        pendingNetIdsToDestroy.Add(networkIdToDestroy);
-                    }
-                    break;
-                case MessageType.SceneObjectSync:
-                    if (role == NetworkRole.Client)
-                    {
-                        var sceneSyncs = (List<object[]>)rootData[1];
-                        foreach (var syncData in sceneSyncs)
-                        {
-                            string sceneId = (string)syncData[0];
-                            int networkId = (int)syncData[1];
-                            NetworkIdentity identity;
-                            if (sceneIdentities.TryGetValue(sceneId, out identity))
-                            {
-                                identity.SetNetworkId(networkId);
-                                networkIdentities[networkId] = identity;
-                            }
-                        }
-                    }
-                    break;
-                case MessageType.GrabObjectRequest:
-                    if (role == NetworkRole.Server || role == NetworkRole.Host)
-                    {
-                        int objNetId = (int)rootData[1];
-                        lock (pendingServerGrabRequests)
-                        {
-                            pendingServerGrabRequests.Add((objNetId, sender));
-                        }
-                    }
-                    break;
-
-                case MessageType.GrabObjectUpdate:
-                    if (role == NetworkRole.Client || role == NetworkRole.Host || role == NetworkRole.Server)
-                    {
-                        lock (pendingGrabUpdates)
-                        {
-                            pendingGrabUpdates.Add(rootData);
-                        }
-                    }
-                    break;
-                case MessageType.ReleaseObjectRequest:
-                    if (role == NetworkRole.Server || role == NetworkRole.Host)
-                    {
-                        int objNetId = (int)rootData[1];
-                        
-                        Vector3 throwVel = new Vector3((float)rootData[2], (float)rootData[3], (float)rootData[4]);
-
-                        lock (pendingServerReleaseRequests)
-                        {
-                            pendingServerReleaseRequests.Add((objNetId, sender, throwVel));
-                        }
-                    }
-                    break;
-                case MessageType.ReleaseObjectBroadcast:
-                    if (role == NetworkRole.Client || role == NetworkRole.Host || role == NetworkRole.Server)
-                    {
-                        int objNetId = (int)rootData[1];
-                        lock (pendingReleaseNetIds)
-                        {
-                            pendingReleaseNetIds.Add(objNetId);
-                        }
-                    }
-                    break;
-                case MessageType.SpawnRopeAttachments:
-                    lock (pendingRpcCalls)
-                    {
-                        pendingRpcCalls.Add(rootData);
-                    }
-                    break;
+                    pendingAckPackets.RemoveAll(p => p.sequenceId == ackSeqId);
+                }
+                return; 
             }
+
+            if (!latestSequenceReceived.ContainsKey(sender))
+            {
+                latestSequenceReceived[sender] = 0;
+            }
+
+            if (sequenceId <= latestSequenceReceived[sender])
+            {
+
+            }
+            latestSequenceReceived[sender] = sequenceId;
+
+            if (!clientConnections.ContainsKey(sender))
+            {
+                ClientConnection newClient = new ClientConnection(nextConnectionId++, sender, (float)NetTimer.GetTime());
+
+                clientConnections.Add(sender, newClient);
+
+                Debug.Log($"New Client Connected: ID {newClient.ConnectionId} [{sender}]");
+
+                object[] sceneSyncMsg = GetSceneObjectsSyncData();
+                SendNetworkMessage(sceneSyncMsg, sender, true);
+            }
+            else
+            {
+                clientConnections[sender].LastMessageTime = (float)NetTimer.GetTime();
+            }
+
+            ProcessGameData(payload, sender);
         }
         catch (System.Exception e)
         {
             Debug.LogError($"Error deserializando datos: {e.Message} from {sender}");
+        }
+    }
+
+
+    private void ProcessGameData(object[] rootData, EndPoint sender)
+    {
+        MessageType messageType = (MessageType)(byte)rootData[0];
+
+        switch (messageType)
+        {
+            case MessageType.TransformSync:
+                if (role != NetworkRole.Client)
+                {
+                    ApplyTransformSync(rootData);
+
+                    object[] response = GetTransformsData();
+                    SendNetworkMessage(response, sender, false);
+                }
+                else
+                {
+                    ApplyTransformSync(rootData);
+                }
+                break;
+
+            case MessageType.SpawnObjectBroadcast:
+            case MessageType.SpawnObjectBroadcastOwned:
+                if (role != NetworkRole.Server)
+                {
+                    lock (pendingSpawnRequests)
+                    {
+                        pendingSpawnRequests.Add(rootData);
+                    }
+                }
+                break;
+
+            case MessageType.SpawnObjectRequest:
+                if (role != NetworkRole.Client)
+                {
+                    lock (pendingServerSpawnRequests)
+                    {
+                        pendingServerSpawnRequests[rootData] = sender;
+                    }
+                }
+                break;
+            case MessageType.DestroyObject:
+
+                int networkIdToDestroy = (int)rootData[1];
+                if (role == NetworkRole.Server || role == NetworkRole.Host)
+                {
+                    BroadcastDestroyObject(networkIdToDestroy);
+                }
+                else if (role == NetworkRole.Client)
+                {
+                    pendingNetIdsToDestroy.Add(networkIdToDestroy);
+                }
+                break;
+            case MessageType.SceneObjectSync:
+                if (role == NetworkRole.Client)
+                {
+                    var sceneSyncs = (List<object[]>)rootData[1];
+                    foreach (var syncData in sceneSyncs)
+                    {
+                        string sceneId = (string)syncData[0];
+                        int networkId = (int)syncData[1];
+                        NetworkIdentity identity;
+                        if (sceneIdentities.TryGetValue(sceneId, out identity))
+                        {
+                            identity.SetNetworkId(networkId);
+                            networkIdentities[networkId] = identity;
+                        }
+                    }
+                }
+                break;
+            case MessageType.GrabObjectRequest:
+                if (role == NetworkRole.Server || role == NetworkRole.Host)
+                {
+                    int objNetId = (int)rootData[1];
+                    lock (pendingServerGrabRequests)
+                    {
+                        pendingServerGrabRequests.Add((objNetId, sender));
+                    }
+                }
+                break;
+
+            case MessageType.GrabObjectUpdate:
+                if (role == NetworkRole.Client || role == NetworkRole.Host || role == NetworkRole.Server)
+                {
+                    lock (pendingGrabUpdates)
+                    {
+                        pendingGrabUpdates.Add(rootData);
+                    }
+                }
+                break;
+            case MessageType.ReleaseObjectRequest:
+                if (role == NetworkRole.Server || role == NetworkRole.Host)
+                {
+                    int objNetId = (int)rootData[1];
+
+                    Vector3 throwVel = new Vector3((float)rootData[2], (float)rootData[3], (float)rootData[4]);
+
+                    lock (pendingServerReleaseRequests)
+                    {
+                        pendingServerReleaseRequests.Add((objNetId, sender, throwVel));
+                    }
+                }
+                break;
+            case MessageType.ReleaseObjectBroadcast:
+                if (role == NetworkRole.Client || role == NetworkRole.Host || role == NetworkRole.Server)
+                {
+                    int objNetId = (int)rootData[1];
+                    lock (pendingReleaseNetIds)
+                    {
+                        pendingReleaseNetIds.Add(objNetId);
+                    }
+                }
+                break;
+            case MessageType.TimeSyncRequest:
+                if (role == NetworkRole.Server || role == NetworkRole.Host)
+                {
+                    HandleTimeSyncRequest(rootData, sender);
+                }
+                break;
+
+            case MessageType.TimeSyncResponse:
+                if (role == NetworkRole.Client)
+                {
+                    HandleTimeSyncResponse(rootData);
+                }
+                break;
+            case MessageType.SpawnRopeAttachments:
+                lock (pendingRpcCalls)
+                {
+                    pendingRpcCalls.Add(rootData);
+                }
+                break;
+        }
+    }
+
+    #region AcknowledgmentsLogic
+
+    private byte[] SerializePacket(object[] originalData, bool isReliable, int seqId)
+    {
+        double networkTime = NetTimer.GetTime() + clientTimeOffset;
+
+        object[] packetWrapper = new object[]
+        {
+        seqId,
+        (float)NetTimer.GetTime(),
+        isReliable,
+        originalData
+        };
+
+        using (var memoryStream = new MemoryStream())
+        {
+            var binaryFormatter = new BinaryFormatter();
+            binaryFormatter.Serialize(memoryStream, packetWrapper);
+            return memoryStream.ToArray();
+        }
+    }
+
+    private object[] DeserializePacketWrapper(byte[] data)
+    {
+        using (var memoryStream = new MemoryStream(data))
+        {
+            var binaryFormatter = new BinaryFormatter();
+            return (object[])binaryFormatter.Deserialize(memoryStream);
+        }
+    }
+    private void SendAck(int sequenceId, EndPoint target)
+    {
+        object[] ackPayload = new object[] { (byte)MessageType.Ack, sequenceId };
+
+        SendNetworkMessage(ackPayload, target, false);
+    }
+
+    #endregion  
+
+    public void SendNetworkMessage(object[] data, System.Net.EndPoint target, bool isReliable)
+    {
+        int seqId;
+        lock (sequenceLock)
+        {
+            localSequenceId++;
+            seqId = localSequenceId;
+        }
+
+        byte[] packetBytes = SerializePacket(data, isReliable, seqId);
+
+        try
+        {
+            socket.SendTo(packetBytes, target);
+
+            if (isReliable)
+            {
+                lock (pendingAckPackets)
+                {
+                    pendingAckPackets.Add(new PendingPacket(seqId, (float)NetTimer.GetTime(), packetBytes, target));
+                }
+            }
+        }
+        catch (SocketException e)
+        {
+            Debug.LogWarning($"Send Error: {e.Message}");
         }
     }
 
@@ -912,17 +1010,52 @@ public class NetworkManager : MonoBehaviour
             return;
         }
 
-        byte[] requestMessage = SerializeDestroyRequest(networkId);
+        object[] requestMessage = GetDestroyRequestData(networkId);
         IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
 
-        try
+        SendNetworkMessage(requestMessage, serverEp, true);
+    }
+
+    public void SendTimeSyncRequest()
+    {
+        object[] data = new object[]
         {
-            socket.SendTo(requestMessage, serverEp);
-        }
-        catch (SocketException e)
+        (byte)MessageType.TimeSyncRequest,
+        NetTimer.GetTime()
+        };
+
+        SendNetworkMessage(data, new IPEndPoint(IPAddress.Parse(serverAddress), port), false);
+    }
+
+    private void HandleTimeSyncRequest(object[] payload, EndPoint sender)
+    {
+        double clientSentTime = (double)payload[1];
+
+        object[] response = new object[]
         {
-            Debug.LogError($"Error sending request for destruction: {e.Message}");
-        }
+        (byte)MessageType.TimeSyncResponse,
+        clientSentTime,
+        NetTimer.GetTime()
+        };
+
+        SendNetworkMessage(response, sender, false);
+    }
+
+    private void HandleTimeSyncResponse(object[] payload)
+    {
+        double clientSentTime = (double)payload[1];
+        double serverTimeStep = (double)payload[2];
+        double now = NetTimer.GetTime();
+
+        double rtt = now - clientSentTime;
+
+        double latency = rtt / 2.0;
+
+        double expectedServerTime = serverTimeStep + latency;
+
+        clientTimeOffset = expectedServerTime - now;
+
+        Debug.Log($"[Clock Sync] RTT: {rtt * 1000:0}ms | Offset: {clientTimeOffset:0.00}s");
     }
 
     public void BroadcastDestroyObject(int networkId)
@@ -933,17 +1066,17 @@ public class NetworkManager : MonoBehaviour
             return;
         }
         
-        byte[] destroyMessage = SerializeDestroyObject(networkId);
+        object[] destroyMessage = GetDestroyObjectData(networkId);
 
-        foreach (var ep in clientEndpoints)
+        foreach (var clientProxy in clientConnections.Values)
         {
             try
             {
-                socket.SendTo(destroyMessage, ep);
+                SendNetworkMessage(destroyMessage, clientProxy.EndPoint, true);
             }
             catch (SocketException e)
             {
-                Debug.LogWarning($"Error sending messago to {ep}: {e.Message}");
+                Debug.LogWarning($"Error sending messago to {clientProxy.EndPoint}: {e.Message}");
             }
         }
 
@@ -1025,10 +1158,10 @@ public class NetworkManager : MonoBehaviour
         {
             if (socket == null) break;
 
-            byte[] transformsData = SerializeTransformsBinary();
+            object[] transformsData = GetTransformsData();
             try
             {
-                socket.SendTo(transformsData, serverEp);
+                SendNetworkMessage(transformsData, serverEp, false);
             }
             catch (SocketException) { break; }
             catch (System.ObjectDisposedException) { break; }
@@ -1050,8 +1183,6 @@ public class NetworkManager : MonoBehaviour
                     HandleData(buffer, receivedBytes, sender);
                 }
             }
-
-            Thread.Sleep(33);
         }
     }
 
@@ -1060,22 +1191,15 @@ public class NetworkManager : MonoBehaviour
         yield return new WaitForSeconds(1f);
         SpawnRopesForEachPlayer();
     }
-
-    #region GrabLogic [New Section]
+   
+    #region GrabLogic
 
     public void ClientRequestGrab(int objectNetworkId)
     {
-        byte[] requestMsg = SerializeGrabRequest(objectNetworkId);
+        object[] requestMsg = GetGrabRequestData(objectNetworkId);
         IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
 
-        try
-        {
-            socket.SendTo(requestMsg, serverEp);
-        }
-        catch (SocketException e)
-        {
-            Debug.LogError($"Failed to send Grab Request: {e.Message}");
-        }
+        SendNetworkMessage(requestMsg, serverEp, true);
     }
 
     private void HandleServerGrabRequest(int objectNetId, EndPoint requester)
@@ -1094,17 +1218,17 @@ public class NetworkManager : MonoBehaviour
 
         int newOwnerPlayerId = -1;
 
-        foreach (var clientEp in clientEndpoints)
+        foreach (var clientProxy in clientConnections.Values)
         {
-            bool isOwner = clientEp.Equals(requester);
-            byte[] msg = SerializeGrabUpdate(objectNetId, newOwnerPlayerId, isOwner);
+            bool isOwner = clientProxy.EndPoint.Equals(requester);
+            object[] msg = GetGrabUpdateData(objectNetId, newOwnerPlayerId, isOwner);
             try
             {
-                socket.SendTo(msg, clientEp);
+                SendNetworkMessage(msg, clientProxy.EndPoint, true);
             }
             catch (SocketException e)
             {
-                Debug.LogWarning($"Failed to send GrabUpdate to {clientEp}: {e.Message}");
+                Debug.LogWarning($"Failed to send GrabUpdate to {clientProxy.EndPoint}: {e.Message}");
             }
         }
     }
@@ -1125,17 +1249,10 @@ public class NetworkManager : MonoBehaviour
     }
     public void ClientRequestRelease(int objectNetworkId, Vector3 throwVelocity)
     {
-        byte[] requestMsg = SerializeReleaseRequest(objectNetworkId, throwVelocity);
+        object[] requestMsg = GetReleaseRequestData(objectNetworkId, throwVelocity);
         IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
 
-        try
-        {
-            socket.SendTo(requestMsg, serverEp);
-        }
-        catch (SocketException e)
-        {
-            Debug.LogError($"Failed to send Release Request: {e.Message}");
-        }
+        SendNetworkMessage(requestMsg, serverEp, true);
     }
 
     private void HandleServerReleaseRequest(int objectNetId, EndPoint requester, Vector3 velocity)
@@ -1149,19 +1266,16 @@ public class NetworkManager : MonoBehaviour
                 serverObjectOwnership.Remove(objectNetId);
                 Debug.Log($"Object {objectNetId} released by {requester}. Reverting to Server Authority with velocity {velocity}.");
 
-                // 1. Get the identity locally on the server
                 if (networkIdentities.TryGetValue(objectNetId, out NetworkIdentity identity))
                 {
-                    // 2. Take ownership back
                     identity.SetIsLocalPlayer(true);
 
-                    // 3. Enable Physics and APPLY VELOCITY
                     Rigidbody rb = identity.GetComponent<Rigidbody>();
                     if (rb != null)
                     {
                         rb.isKinematic = false;
                         rb.useGravity = true;
-                        rb.linearVelocity = velocity; // <--- The magic fix
+                        rb.linearVelocity = velocity;
                     }
                 }
 
@@ -1172,10 +1286,10 @@ public class NetworkManager : MonoBehaviour
 
     private void BroadcastRelease(int objectNetId)
     {
-        byte[] releaseMsg = SerializeReleaseBroadcast(objectNetId);
-        foreach (var ep in clientEndpoints)
+        object[] releaseMsg = GetReleaseBroadcastData(objectNetId);
+        foreach (var clientProxy in clientConnections.Values)
         {
-            try { socket.SendTo(releaseMsg, ep); } catch { }
+            try { SendNetworkMessage(releaseMsg, clientProxy.EndPoint, true); } catch { }
         }
 
         if (role == NetworkRole.Host || role == NetworkRole.Server)
@@ -1257,17 +1371,15 @@ public class NetworkManager : MonoBehaviour
             playerNetId
         };
 
-        byte[] rpcMessage = SerializeRpc(rpcData);
-
-        foreach (var ep in clientEndpoints)
+        foreach (var clientProxy in clientConnections.Values)
         {
             try
             {
-                socket.SendTo(rpcMessage, ep);
+                SendNetworkMessage(rpcData, clientProxy.EndPoint, true);
             }
             catch (SocketException e)
             {
-                Debug.LogWarning($"Error sending RPC to {ep}: {e.Message}");
+                Debug.LogWarning($"Error sending RPC to {clientProxy.EndPoint}: {e.Message}");
             }
         }
 
