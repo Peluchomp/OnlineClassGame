@@ -1196,40 +1196,70 @@ public class NetworkManager : MonoBehaviour
 
     public void ClientRequestGrab(int objectNetworkId)
     {
+        if (networkIdentities.TryGetValue(objectNetworkId, out NetworkIdentity identity))
+        {
+            identity.SetIsLocalPlayer(true);
+            var grabState = identity.GetComponent<GrabState>();
+            if (grabState != null) grabState.OnGrabStateUpdated(true, -1);
+        }
+
         object[] requestMsg = GetGrabRequestData(objectNetworkId);
         IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
-
         SendNetworkMessage(requestMsg, serverEp, true);
     }
 
     private void HandleServerGrabRequest(int objectNetId, EndPoint requester)
     {
+        bool isServerRequest = false;
+        if (requester is IPEndPoint requesterIp)
+        {
+            isServerRequest = (requesterIp.Port == this.port);
+        }
+
         if (serverObjectOwnership.ContainsKey(objectNetId))
         {
             EndPoint currentOwner = serverObjectOwnership[objectNetId];
+
             if (!currentOwner.Equals(requester))
             {
-                Debug.Log($"Grab denied. Object {objectNetId} is held by {currentOwner}.");
-                return;
+                //if (isServerRequest)
+                //{
+                //    Debug.Log($"Server is stealing object {objectNetId} from {currentOwner}");
+
+                //    object[] forceDropMsg = GetGrabUpdateData(objectNetId, -1, false);
+                //    SendNetworkMessage(forceDropMsg, currentOwner, true);
+                //}
+                //else
+               // {
+                    Debug.Log($"Grab denied. Object {objectNetId} is held by {currentOwner}.");
+
+                    object[] denyMsg = GetGrabUpdateData(objectNetId, -1, false);
+                    SendNetworkMessage(denyMsg, requester, true);
+                    return;
+              //  }
             }
         }
 
         serverObjectOwnership[objectNetId] = requester;
 
-        int newOwnerPlayerId = -1;
+        if (networkIdentities.TryGetValue(objectNetId, out NetworkIdentity identity))
+        {
+            identity.SetIsLocalPlayer(isServerRequest);
+
+            Rigidbody rb = identity.GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                rb.isKinematic = !isServerRequest;
+            }
+        }
 
         foreach (var clientProxy in clientConnections.Values)
         {
-            bool isOwner = clientProxy.EndPoint.Equals(requester);
-            object[] msg = GetGrabUpdateData(objectNetId, newOwnerPlayerId, isOwner);
-            try
-            {
-                SendNetworkMessage(msg, clientProxy.EndPoint, true);
-            }
-            catch (SocketException e)
-            {
-                Debug.LogWarning($"Failed to send GrabUpdate to {clientProxy.EndPoint}: {e.Message}");
-            }
+            bool isNowOwner = clientProxy.EndPoint.Equals(requester);
+        
+            object[] msg = GetGrabUpdateData(objectNetId, -1, isNowOwner);
+
+            try { SendNetworkMessage(msg, clientProxy.EndPoint, true); } catch { }
         }
     }
 
@@ -1238,13 +1268,36 @@ public class NetworkManager : MonoBehaviour
         int objectNetId = (int)rootData[1];
         int newOwnerPlayerId = (int)rootData[2];
         bool amIOwner = (bool)rootData[3];
-        Debug.Log("ProcessingUpdateNow im owner?: " + amIOwner);
+
         if (networkIdentities.TryGetValue(objectNetId, out NetworkIdentity identity))
         {
             identity.SetIsLocalPlayer(amIOwner);
-            identity.GetComponent<GrabState>().OnGrabStateUpdated(amIOwner, newOwnerPlayerId);
 
-            Debug.Log($"Grab Update received for {objectNetId}. Am I owner? {amIOwner}");
+            var grabState = identity.GetComponent<GrabState>();
+            if (grabState != null)
+            {
+                grabState.OnGrabStateUpdated(amIOwner, newOwnerPlayerId);
+            }
+
+            if (!amIOwner)
+            {
+                Rigidbody rb = identity.GetComponent<Rigidbody>();
+                Collider col = identity.GetComponent<Collider>();
+                if (rb != null)
+                {
+                    rb.isKinematic = true;
+                }
+                if (col != null)
+                {
+                    col.enabled = true;
+                }
+
+                if (identity.transform.parent != null)
+                {
+                    identity.transform.SetParent(null);
+                    DontDestroyOnLoad(identity.gameObject);
+                }
+            }
         }
     }
     public void ClientRequestRelease(int objectNetworkId, Vector3 throwVelocity)

@@ -11,6 +11,7 @@ public class LobbyManager : MonoBehaviour
     [SerializeField] GameObject startServerGo;
     [SerializeField] GameObject lobbyCam;
 
+    [SerializeField] CustomerManager customerManager;
     public static LobbyManager Instance { get; private set; }
     private void Awake()
     {
@@ -53,6 +54,8 @@ public class LobbyManager : MonoBehaviour
 
         lobbyCam.SetActive(false);
         gameObject.SetActive(false);
+
+        customerManager.SpawnCustomer();
     }
 
 
