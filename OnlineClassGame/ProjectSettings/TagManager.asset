@@ -6,6 +6,14 @@ TagManager:
   tags:
   - Mineral
   - Furnace
+  - Iron
+  - Copper
+  - Silver
+  - Gold
+  - Lead
+  - Sulfur
+  - Zinc
+  - Manganese
   layers:
   - Default
   - TransparentFX

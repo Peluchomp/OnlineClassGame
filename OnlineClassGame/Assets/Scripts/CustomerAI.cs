@@ -10,12 +10,10 @@ public class CustomerAI : MonoBehaviour
 
     void Start()
     {
-       //Guarrada historica lo cambio despues
        if (NetworkManager.Instance.role == NetworkManager.NetworkRole.Client)
        {
-            CustomerManager customerManager = Object.FindFirstObjectByType<CustomerManager>();
-            customerManager.SetActiveInstance(GetComponent<NetworkIdentity>());
-            customerManager.SendCustomerToCounter();
+            CustomerManager.Instance.SetActiveInstance(GetComponent<NetworkIdentity>());
+            CustomerManager.Instance.SendCustomerToCounter();
        }
     }
 
@@ -32,6 +30,7 @@ public class CustomerAI : MonoBehaviour
             hasArrived = true;
             animator.SetTrigger("Arrive");
             animator.SetBool("IsWalking", false);
+            OrderManager.Instance.ActivateOrderDisplay();
         }
 
         if (agent.remainingDistance > agent.stoppingDistance)
@@ -44,5 +43,6 @@ public class CustomerAI : MonoBehaviour
     {
         agent.SetDestination(destination);
         hasArrived = false;
+        OrderManager.Instance.DeactivateOrderDisplay();
     }
 }

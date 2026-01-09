@@ -9,6 +9,8 @@ using System.Net.Sockets;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Threading;
 using UnityEngine;
+using UnityEngine.UIElements;
+using static MineralState;
 
 public class NetworkManager : MonoBehaviour
 {
@@ -27,7 +29,14 @@ public class NetworkManager : MonoBehaviour
         ReleaseObjectBroadcast = 11,
         Ack = 12,
         TimeSyncRequest = 13,
-        TimeSyncResponse = 14
+        TimeSyncResponse = 14,
+        NewOrder = 15,
+        MineObjectRequest = 16,
+        MineObjectBroadcast = 17,
+        RestoreMineralsBroadcast = 18,
+        NewCustomerBroadcast = 19,
+        SyncIntegerValue = 20,
+        TimerSync = 21
     }
     public enum NetworkRole { Server, Client, Host }
     public NetworkRole role = NetworkRole.Host;
@@ -55,6 +64,12 @@ public class NetworkManager : MonoBehaviour
     private List<(int objectNetId, EndPoint requester)> pendingServerGrabRequests = new List<(int, EndPoint)>();
     private List<int> pendingReleaseNetIds = new List<int>();
     private List<(int objectNetId, EndPoint requester, Vector3 velocity)> pendingServerReleaseRequests = new List<(int, EndPoint, Vector3)>();
+    private List<object[]> pendingOrders = new List<object[]>();
+    private List<int> pendingMineRequests = new List<int>();
+    private List<int> pendingMineBroadcasts = new List<int>();
+    private List<bool> pendingNewCustomers = new List<bool>();
+    private List<int> pendingIntValues = new List<int>();
+    private bool pendingRestoreMinerals = false;
 
     Dictionary<int, NetworkIdentity> networkIdentities = new Dictionary<int, NetworkIdentity>();
     Dictionary<string, NetworkIdentity> sceneIdentities = new Dictionary<string, NetworkIdentity>();
@@ -82,6 +97,7 @@ public class NetworkManager : MonoBehaviour
 
     public event Action OnServerStarted;
     public event Action OnClientStarted;
+    public event Action<int> OnIntValueReceived;
 
     private void Awake()
     {
@@ -98,7 +114,7 @@ public class NetworkManager : MonoBehaviour
 
     public void RegisterIdentity(NetworkIdentity identity)
     {
-        Debug.Log("Registering NetworkIdentity: " + identity.gameObject.name);
+        //Debug.Log("Registering NetworkIdentity: " + identity.gameObject.name);
         if (identity == null) return;
 
         if (identity.networkId != 0 && networkIdentities.ContainsKey(identity.networkId))
@@ -246,10 +262,8 @@ public class NetworkManager : MonoBehaviour
             byte[] discoveryMsg = System.Text.Encoding.UTF8.GetBytes("DISCOVER_SERVER");
             IPEndPoint broadcastEp = new IPEndPoint(IPAddress.Broadcast, discoveryPort);
 
-            // Enviar broadcast
             discoverySocket.SendTo(discoveryMsg, broadcastEp);
 
-            // Esperar respuesta
             EndPoint serverEp = new IPEndPoint(IPAddress.Any, 0);
             try
             {
@@ -384,6 +398,66 @@ public class NetworkManager : MonoBehaviour
             }
         }
 
+        if ((role == NetworkRole.Host || role == NetworkRole.Server) && pendingMineRequests.Count > 0)
+        {
+            lock (pendingMineRequests)
+            {
+                foreach (var netId in pendingMineRequests)
+                {
+                    PerformMineLogic(netId);
+                }
+                pendingMineRequests.Clear();
+            }
+        }
+
+        if (pendingMineBroadcasts.Count > 0)
+        {
+            lock (pendingMineBroadcasts)
+            {
+                foreach (var netId in pendingMineBroadcasts)
+                {
+                    DisableMineralLocally(netId);
+                }
+                pendingMineBroadcasts.Clear();
+            }
+        }
+
+        if (pendingNewCustomers.Count > 0)
+        {
+            lock (pendingNewCustomers)
+            {
+                foreach (var pendingCustomer in pendingNewCustomers)
+                {
+                    if (GameManager.Instance != null)
+                    {
+                        GameManager.Instance.NewCustomer();
+                    }
+                }
+                pendingNewCustomers.Clear();
+            }
+        }
+
+        if (pendingIntValues.Count > 0)
+        {
+            lock (pendingIntValues)
+            {
+                foreach (var value in pendingIntValues)
+                {
+                    OnIntValueReceived?.Invoke(value);
+                }
+                pendingIntValues.Clear();
+            }
+        }
+
+        if (pendingRestoreMinerals)
+        {
+            if (MineralManager.Instance != null)
+            {
+                MineralManager.Instance.RestoreMinerals();
+            }
+            pendingRestoreMinerals = false;
+        }
+
         lock (pendingAckPackets)
         {
             for (int i = pendingAckPackets.Count - 1; i >= 0; i--)
@@ -412,6 +486,18 @@ public class NetworkManager : MonoBehaviour
             }
         }
 
+        if (pendingOrders.Count > 0)
+        {
+            lock (pendingOrders)
+            {
+                foreach (var orderData in pendingOrders)
+                {
+                    HandleOrderBroadcast(orderData);
+                }
+                pendingOrders.Clear();
+            }
+        }
+
     }
     void OnDestroy()
     {
@@ -429,6 +515,33 @@ public class NetworkManager : MonoBehaviour
     }
 
     #region SerializeNetworkMessages
+
+    private object[] GetTimerSyncData(double startTime, float duration)
+    {
+        return new object[]
+        {
+            (byte)MessageType.TimerSync,
+            startTime,
+            duration
+        };
+    }
+
+    private object[] GetNewCustomerBroadcastData()
+    {
+        return new object[]
+        {
+            (byte)MessageType.NewCustomerBroadcast
+        };
+    }
+
+    private object[] GetSyncIntData(int value)
+    {
+        return new object[]
+        {
+            (byte)MessageType.SyncIntegerValue,
+            value
+        };
+    }
 
     private object[] GetSpawnBroadcastData(int prefabId, int networkId, Vector3 pos, Quaternion rot, MessageType messageType)
     {
@@ -477,6 +590,11 @@ public class NetworkManager : MonoBehaviour
                 floats.Add(t.netwScale.y);
                 floats.Add(t.netwScale.z);
             }
+        }
+
+        if (sceneSyncs.Count == 0 && ids.Count == 0)
+        {
+            return null;
         }
 
         return new object[] { (byte)MessageType.TransformSync, sceneSyncs, ids, floats };
@@ -563,6 +681,82 @@ public class NetworkManager : MonoBehaviour
         };
     }
 
+    private object[] GetOrderBroadcastData(int orderId, int min1, int amt1, int min2, int amt2)
+    {
+        return new object[]
+        {
+        (byte)MessageType.NewOrder,
+        orderId,
+        min1,
+        amt1,
+        min2,
+        amt2
+        };
+    }
+
+    public void ServerBroadcastOrder(int orderId, int min1, int amt1, int min2, int amt2)
+    {
+        if (role == NetworkRole.Client) return;
+
+        object[] packetData = GetOrderBroadcastData(orderId, min1, amt1, min2, amt2);
+
+        foreach (var clientProxy in clientConnections.Values)
+        {
+            try
+            {
+                SendNetworkMessage(packetData, clientProxy.EndPoint, true);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"Failed to send order to {clientProxy.EndPoint}: {e.Message}");
+            }
+        }
+
+            if (OrderManager.Instance != null)
+            {
+                OrderManager.Instance.ReceiveOrder(orderId, (MineralType)min1, amt1, (MineralType)min2, amt2);
+            }
+    }
+
+    private void HandleOrderBroadcast(object[] rootData)
+    {
+        if (OrderManager.Instance == null) return;
+
+        int orderId = (int)rootData[1];
+        int m1 = (int)rootData[2];
+        int a1 = (int)rootData[3];
+        int m2 = (int)rootData[4];
+        int a2 = (int)rootData[5];
+
+        OrderManager.Instance.ReceiveOrder(orderId, (MineralType)m1, a1, (MineralType)m2, a2);
+    }
+
+    private object[] GetMineRequestData(int networkId)
+    {
+        return new object[]
+        {
+            (byte)MessageType.MineObjectRequest,
+            networkId
+        };
+    }
+
+    private object[] GetMineBroadcastData(int networkId)
+    {
+        return new object[]
+        {
+            (byte)MessageType.MineObjectBroadcast,
+            networkId
+        };
+    }
+
+    private object[] GetRestoreMineralsData()
+    {
+        return new object[]
+        {
+            (byte)MessageType.RestoreMineralsBroadcast
+        };
+    }
+
     #endregion
 
     #region SpawnMethods
@@ -643,7 +837,7 @@ public class NetworkManager : MonoBehaviour
                 Debug.LogWarning($"Failed to send spawn broadcast to {clientProxy.EndPoint}: {e.Message}");
             }
         }
-        Debug.Log($"Spawned and broadcasted object {prefab.name} with NetworkId {identity.networkId}. Owner: {(owner == null ? "Server" : owner.ToString())}");
+        //Debug.Log($"Spawned and broadcasted object {prefab.name} with NetworkId {identity.networkId}. Owner: {(owner == null ? "Server" : owner.ToString())}");
         return identity;
     }
 
@@ -718,11 +912,78 @@ public class NetworkManager : MonoBehaviour
 
     #endregion
 
+    public void ServerBroadcastTimer(float duration)
+    {
+        if (role == NetworkRole.Client) return;
+
+        double startTime = GetNetworkTime();
+
+        object[] data = GetTimerSyncData(startTime, duration);
+
+        foreach (var clientProxy in clientConnections.Values)
+        {
+            try
+            {
+                SendNetworkMessage(data, clientProxy.EndPoint, true);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"Failed to broadcast Timer: {e.Message}");
+            }
+        }
+
+        if (OrderManager.Instance != null)
+        {
+            OrderManager.Instance.StartTimer(startTime, duration);
+        }
+    }
+
+    public void ServerBroadcastNewCustomer()
+    {
+        if (role == NetworkRole.Client) return;
+
+        object[] data = GetNewCustomerBroadcastData();
+
+        foreach (var clientProxy in clientConnections.Values)
+        {
+            try
+            {
+                SendNetworkMessage(data, clientProxy.EndPoint, true);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"Failed to broadcast New Customer: {e.Message}");
+            }
+        }
+    }
+
+    public void ServerBroadcastIntegerValue(int value)
+    {
+        if (role == NetworkRole.Client) return;
+
+        object[] data = GetSyncIntData(value);
+
+        foreach (var clientProxy in clientConnections.Values)
+        {
+            try
+            {
+                Debug.Log($"Broadcasting Int Value: {value} to {clientProxy.EndPoint}");
+                SendNetworkMessage(data, clientProxy.EndPoint, true);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"Failed to broadcast Int Value: {e.Message}");
+            }
+        }
+
+        OnIntValueReceived?.Invoke(value);
+    }
+
     private void HandleData(byte[] data, int length, EndPoint sender)
     {
         try
         {
-            object[] wrapper = DeserializePacketWrapper(data);
+            object[] wrapper = DeserializePacketWrapper(data, length);
 
             int sequenceId = (int)wrapper[0];
             float serverTime = (float)wrapper[1];
@@ -735,6 +996,8 @@ public class NetworkManager : MonoBehaviour
             }
 
             MessageType msgType = (MessageType)(byte)payload[0];
+
+            Debug.Log($"Data received from {sender}, length: {length} bytes, message Type: {msgType}");
             if (msgType == MessageType.Ack)
             {
                 int ackSeqId = (int)payload[1];
@@ -782,6 +1045,10 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
+    public double GetNetworkTime()
+    {
+        return NetTimer.GetTime() + clientTimeOffset;
+    }
 
     private void ProcessGameData(object[] rootData, EndPoint sender)
     {
@@ -790,19 +1057,8 @@ public class NetworkManager : MonoBehaviour
         switch (messageType)
         {
             case MessageType.TransformSync:
-                if (role != NetworkRole.Client)
-                {
-                    ApplyTransformSync(rootData);
-
-                    object[] response = GetTransformsData();
-                    SendNetworkMessage(response, sender, false);
-                }
-                else
-                {
-                    ApplyTransformSync(rootData);
-                }
+               ApplyTransformSync(rootData);
                 break;
-
             case MessageType.SpawnObjectBroadcast:
             case MessageType.SpawnObjectBroadcastOwned:
                 if (role != NetworkRole.Server)
@@ -914,8 +1170,159 @@ public class NetworkManager : MonoBehaviour
                     pendingRpcCalls.Add(rootData);
                 }
                 break;
+            case MessageType.NewOrder:
+                lock (pendingOrders)
+                {
+                    pendingOrders.Add(rootData);
+                }
+                break;
+            case MessageType.MineObjectRequest:
+                if (role == NetworkRole.Server || role == NetworkRole.Host)
+                {
+                    int netId = (int)rootData[1];
+                    lock (pendingMineRequests)
+                    {
+                        pendingMineRequests.Add(netId);
+                    }
+                }
+                break;
+
+            case MessageType.MineObjectBroadcast:
+                if (role == NetworkRole.Client)
+                {
+                    int netId = (int)rootData[1];
+                    lock (pendingMineBroadcasts)
+                    {
+                        pendingMineBroadcasts.Add(netId);
+                    }
+                }
+                break;
+
+            case MessageType.RestoreMineralsBroadcast:
+                pendingRestoreMinerals = true;
+                break;
+            case MessageType.NewCustomerBroadcast:
+                lock (pendingNewCustomers)
+                {
+                    pendingNewCustomers.Add(true);
+                }
+                break;
+            case MessageType.SyncIntegerValue:
+                int receivedValue = (int)rootData[1];
+                lock (pendingIntValues)
+                {
+                    pendingIntValues.Add(receivedValue);
+                }
+                break;
+            case MessageType.TimerSync:
+                double startTime = (double)rootData[1];
+                float duration = (float)rootData[2];
+                if (OrderManager.Instance != null)
+                {
+                    OrderManager.Instance.StartTimer(startTime, duration);
+                }
+                break;
         }
     }
+
+    #region Mining Logic
+
+    public void ClientRequestMine(int networkId)
+    {
+        if (role == NetworkRole.Server || role == NetworkRole.Host)
+        {
+            ServerHandleMine(networkId);
+            return;
+        }
+
+        object[] data = GetMineRequestData(networkId);
+        IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
+        SendNetworkMessage(data, serverEp, true);
+    }
+
+    public void ServerHandleMine(int networkId)
+    {
+        lock (pendingMineRequests)
+        {
+            pendingMineRequests.Add(networkId);
+        }
+    }
+
+    private void PerformMineLogic(int networkId)
+    {
+        Debug.Log($"Performing mine logic for mineral {networkId}.");
+        if (networkIdentities.TryGetValue(networkId, out NetworkIdentity identity))
+        {
+            Debug.Log($"Found mineral identity for {networkId}, proceeding to mine.");
+            MineralState mineralState = identity.GetComponent<MineralState>();
+            if (mineralState != null)
+            {
+                mineralState.Mine();
+            }
+
+            BroadcastMineDisable(networkId);
+
+            DisableMineralLocally(networkId);
+        }
+    }
+
+    private void BroadcastMineDisable(int networkId)
+    {
+        object[] data = GetMineBroadcastData(networkId);
+
+        foreach (var clientProxy in clientConnections.Values)
+        {
+            try
+            {
+                SendNetworkMessage(data, clientProxy.EndPoint, true);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"Failed to broadcast mine disable: {e.Message}");
+            }
+        }
+    }
+
+    private void DisableMineralLocally(int networkId)
+    {
+        if (networkIdentities.TryGetValue(networkId, out NetworkIdentity identity))
+        {
+            identity.gameObject.SetActive(false);
+            Debug.Log($"Mineral {networkId} mined and disabled.");
+        }
+    }
+
+    #endregion
+
+    #region Restore Minerals Logic
+
+    [ContextMenu("Restore All Minerals")]
+    public void ServerBroadcastRestoreMinerals()
+    {
+        if (role == NetworkRole.Client) return;
+
+        if (MineralManager.Instance != null)
+        {
+            Debug.Log("Restoring all minerals on server.");
+            MineralManager.Instance.RestoreMinerals();
+        }
+
+        object[] data = GetRestoreMineralsData();
+
+        foreach (var clientProxy in clientConnections.Values)
+        {
+            try
+            {
+                SendNetworkMessage(data, clientProxy.EndPoint, true);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"Failed to broadcast restore minerals: {e.Message}");
+            }
+        }
+    }
+
+    #endregion
 
     #region AcknowledgmentsLogic
 
@@ -939,9 +1346,9 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
-    private object[] DeserializePacketWrapper(byte[] data)
+    private object[] DeserializePacketWrapper(byte[] data, int length)
     {
-        using (var memoryStream = new MemoryStream(data))
+        using (var memoryStream = new MemoryStream(data, 0, length))
         {
             var binaryFormatter = new BinaryFormatter();
             return (object[])binaryFormatter.Deserialize(memoryStream);
@@ -999,6 +1406,7 @@ public class NetworkManager : MonoBehaviour
         else
         {
             Debug.LogWarning($"NetworkIdentity {networkId} not found to destroy.");
+            pendingNetIdsToDestroy.Remove(networkId);
         }
     }
 
@@ -1122,19 +1530,35 @@ public class NetworkManager : MonoBehaviour
 
     void ServerProcess()
     {
-        byte[] buffer = new byte[2048];
+        byte[] buffer = new byte[65536];
 
         while (!m_cancel)
         {
+            if (socket != null && socket.IsBound)
+            {
+                object[] transformsData = GetTransformsData();
+
+                if (transformsData != null && clientConnections.Count > 0)
+                {
+
+                    foreach (var client in clientConnections.Values)
+                    {
+                        try
+                        {
+                            SendNetworkMessage(transformsData, client.EndPoint, false);
+                        }
+                        catch (SocketException) { }
+                    }
+                }
+            }
+
             EndPoint sender = new IPEndPoint(IPAddress.Any, 0);
             int receivedBytes = 0;
             try
             {
-                if (socket == null || !socket.IsBound) break;
-
                 if (socket.Available == 0)
                 {
-                    Thread.Sleep(1); 
+                    Thread.Sleep(1);
                     continue;
                 }
 
@@ -1152,7 +1576,7 @@ public class NetworkManager : MonoBehaviour
     void ClientProcess()
     {
         IPEndPoint serverEp = new IPEndPoint(IPAddress.Parse(serverAddress), port);
-        byte[] buffer = new byte[2048];
+        byte[] buffer = new byte[65536];
 
         while (!m_cancel)
         {
@@ -1161,10 +1585,17 @@ public class NetworkManager : MonoBehaviour
             object[] transformsData = GetTransformsData();
             try
             {
-                SendNetworkMessage(transformsData, serverEp, false);
+                if (transformsData != null)
+                    SendNetworkMessage(transformsData, serverEp, false);
             }
             catch (SocketException) { break; }
             catch (System.ObjectDisposedException) { break; }
+
+            if (socket.Available == 0)
+            {
+                Thread.Sleep(33);
+                continue;
+            }
 
             if (role == NetworkRole.Client)
             {
@@ -1180,6 +1611,8 @@ public class NetworkManager : MonoBehaviour
 
                 if (receivedBytes > 0)
                 {
+                    Debug.Log($"Server received {receivedBytes} bytes from {sender}. Buffer is this large:{buffer}");
+
                     HandleData(buffer, receivedBytes, sender);
                 }
             }

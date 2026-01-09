@@ -58,7 +58,7 @@ public class NetworkTransform : MonoBehaviour
             bool scaleChanged = Vector3.Distance(transform.localScale, lastScale) > scaleThreshold;
 
             sendData = positionChanged || rotationChanged || scaleChanged;
-            Debug.Log($"[NetworkTransform] sendData: {sendData} (PosChanged: {positionChanged}, RotChanged: {rotationChanged}, ScaleChanged: {scaleChanged})");
+            //Debug.Log($"[NetworkTransform] sendData: {sendData} (PosChanged: {positionChanged}, RotChanged: {rotationChanged}, ScaleChanged: {scaleChanged})");
             if (sendData)
             {
                 netwPos = transform.position;
@@ -69,7 +69,6 @@ public class NetworkTransform : MonoBehaviour
                 lastRotation = transform.rotation;
                 lastScale = transform.localScale;
             }
-            sendData = true;
         }
     }
 

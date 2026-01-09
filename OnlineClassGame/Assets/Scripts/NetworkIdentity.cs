@@ -23,15 +23,15 @@ public class NetworkIdentity : MonoBehaviour
         m_sceneId = System.Guid.NewGuid().ToString();
     }
 
-    void OnEnable()
-    {
+    //void OnEnable()     
+    //{
        
-        if (NetworkManager.Instance != null)
-        {
-            NetworkManager.Instance.OnServerStarted += RegisterSelf;
-            NetworkManager.Instance.OnClientStarted += RegisterSelf;
-        }
-    }
+    //    if (NetworkManager.Instance != null)
+    //    {
+    //        NetworkManager.Instance.OnServerStarted += RegisterSelf;
+    //        NetworkManager.Instance.OnClientStarted += RegisterSelf;
+    //    }
+    //}
 
     private void Start()
     {
@@ -53,7 +53,7 @@ public class NetworkIdentity : MonoBehaviour
 
     private void RegisterSelf()
     {
-        Debug.Log($"Registering NetworkIdentity with SceneID: {m_sceneId}");
+        //Debug.Log($"Registering NetworkIdentity with SceneID: {m_sceneId}");
         NetworkManager.Instance.RegisterIdentity(this);
     }
 

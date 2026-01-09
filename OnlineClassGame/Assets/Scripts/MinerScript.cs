@@ -56,16 +56,19 @@ public class MinerScript : MonoBehaviour
 
                 if (minerActionPressed)
                 {
-                    if (hit.collider.GetComponent<NetworkIdentity>() != null)
+                    Debug.Log("Pressed Action");
+                    NetworkIdentity hitIdentity = hit.collider.GetComponent<NetworkIdentity>();
+                    if (hitIdentity != null)
                     {
-                        if (NetworkManager.Instance.role == NetworkManager.NetworkRole.Server)
+                        if (NetworkManager.Instance.role == NetworkManager.NetworkRole.Server) 
                         {
-                            NetworkManager.Instance.BroadcastDestroyObject(hit.collider.GetComponent<NetworkIdentity>().networkId);
+                            NetworkManager.Instance.ServerHandleMine(hitIdentity.networkId);
                         }
                         else
                         {
-                            NetworkManager.Instance.ClientRequestDestroy(hit.collider.GetComponent<NetworkIdentity>().networkId);
+                            NetworkManager.Instance.ClientRequestMine(hitIdentity.networkId);
                         }
+
                         if (animator != null)
                         {
                             animator.SetTrigger("Mine");

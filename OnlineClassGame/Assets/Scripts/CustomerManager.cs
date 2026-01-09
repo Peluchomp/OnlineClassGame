@@ -10,10 +10,23 @@ public class CustomerManager : MonoBehaviour
 
     NetworkIdentity customerActiveInstance;
 
+    public static CustomerManager Instance { get; private set; }
+
+    private void Awake()
+    {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+
+        Instance = this;
+    }
+
     public void SpawnCustomer()
     {
         if (NetworkManager.Instance.role != NetworkRole.Server) return;
-
+        Debug.Log("Spawning Customer");
         customerActiveInstance = NetworkManager.Instance.ServerSpawnAndBroadcast(Random.Range(2,2),customerSpawn.position,Quaternion.identity);
 
         SendCustomerToCounter();
@@ -22,6 +35,7 @@ public class CustomerManager : MonoBehaviour
     public void DespawnCustomer()
     {
         if (NetworkManager.Instance.role != NetworkRole.Server) return;
+        Debug.Log("Despawning Customer");
         NetworkManager.Instance.BroadcastDestroyObject(customerActiveInstance.networkId);
     }
 
@@ -43,7 +57,7 @@ public class CustomerManager : MonoBehaviour
 
         if (NetworkManager.Instance.role == NetworkRole.Server)
         {
-            SendNewCustomerAfterDelay(3f);
+            StartCoroutine(SendNewCustomerAfterDelay(1.5f));
         }
     }
 

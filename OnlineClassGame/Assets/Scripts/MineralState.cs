@@ -2,17 +2,48 @@ using UnityEngine;
 
 public class MineralState : MonoBehaviour
 {
-    bool isQuitting;
-    private void OnApplicationQuit()
+    public enum MineralType
     {
-        isQuitting = true;
+        Iron,
+        Copper,
+        Silver,
+        Gold,
+        Lead,
+        Sulfur,
+        Zinc,
+        Manganese,
+        None = 99
     }
 
-    private void OnDestroy()
+    public MineralType mineralType;
+    public void Mine()
     {
-        if (!isQuitting)
+        switch (mineralType)
         {
-            NetworkManager.Instance.ServerSpawnAndBroadcast(1, transform.position + Vector3.up, Quaternion.identity);
+            case MineralType.Iron:
+                NetworkManager.Instance.ServerSpawnAndBroadcast(1, transform.position + Vector3.up, Quaternion.identity);
+                break;
+            case MineralType.Copper:
+                NetworkManager.Instance.ServerSpawnAndBroadcast(3, transform.position + Vector3.up, Quaternion.identity);
+                break;
+            case MineralType.Silver:
+                NetworkManager.Instance.ServerSpawnAndBroadcast(6, transform.position + Vector3.up, Quaternion.identity);
+                break;
+            case MineralType.Gold:
+                NetworkManager.Instance.ServerSpawnAndBroadcast(4, transform.position + Vector3.up, Quaternion.identity);
+                break;
+            case MineralType.Lead:
+                NetworkManager.Instance.ServerSpawnAndBroadcast(5, transform.position + Vector3.up, Quaternion.identity);
+                break;
+            case MineralType.Sulfur:
+                NetworkManager.Instance.ServerSpawnAndBroadcast(7, transform.position + Vector3.up, Quaternion.identity);
+                break;
+            case MineralType.Zinc:
+                NetworkManager.Instance.ServerSpawnAndBroadcast(9, transform.position + Vector3.up, Quaternion.identity);
+                break;
+            case MineralType.Manganese:
+                NetworkManager.Instance.ServerSpawnAndBroadcast(8, transform.position + Vector3.up, Quaternion.identity);
+                break;
         }
     }
 }

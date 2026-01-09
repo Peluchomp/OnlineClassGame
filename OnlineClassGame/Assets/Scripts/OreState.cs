@@ -6,6 +6,10 @@ public class OreState : MonoBehaviour
     float timer;
     float cookTime = 5;
 
+    GameObject oreObject;
+
+    public MineralState.MineralType mineralType;
+
     [SerializeField] ParticleSystem cookParticles;
     bool oreCooked;
 
@@ -17,9 +21,40 @@ public class OreState : MonoBehaviour
             cookParticles.Play();
             if (timer > cookTime)
             {
-                GetComponent<Renderer>().enabled = false;
-                cookParticles.Stop();
                 oreCooked = true;
+                if (NetworkManager.Instance.role != NetworkManager.NetworkRole.Server)
+                    return;
+
+                switch(mineralType)
+                {
+                    case MineralState.MineralType.Iron:
+                        NetworkManager.Instance.ServerSpawnAndBroadcast(12, transform.position + Vector3.up, Quaternion.identity);
+                        break;
+                    case MineralState.MineralType.Copper:
+                        NetworkManager.Instance.ServerSpawnAndBroadcast(10, transform.position + Vector3.up, Quaternion.identity);
+                        break;
+                    case MineralState.MineralType.Silver:
+                        NetworkManager.Instance.ServerSpawnAndBroadcast(15, transform.position + Vector3.up, Quaternion.identity);
+                        break;
+                    case MineralState.MineralType.Gold:
+                        NetworkManager.Instance.ServerSpawnAndBroadcast(11, transform.position + Vector3.up, Quaternion.identity);
+                        break;
+                    case MineralState.MineralType.Lead:
+                        NetworkManager.Instance.ServerSpawnAndBroadcast(13, transform.position + Vector3.up, Quaternion.identity);
+                        break;
+                    case MineralState.MineralType.Sulfur:
+                        NetworkManager.Instance.ServerSpawnAndBroadcast(16, transform.position + Vector3.up, Quaternion.identity);
+                        break;
+                    case MineralState.MineralType.Zinc:
+                        NetworkManager.Instance.ServerSpawnAndBroadcast(17, transform.position + Vector3.up, Quaternion.identity);
+                        break;
+                    case MineralState.MineralType.Manganese:
+                        NetworkManager.Instance.ServerSpawnAndBroadcast(14, transform.position + Vector3.up, Quaternion.identity);
+                        break;
+                }
+
+           
+                NetworkManager.Instance.BroadcastDestroyObject(GetComponent<NetworkIdentity>().networkId);
             }
         }
     }
