@@ -340,6 +340,7 @@ public class NetworkManager : MonoBehaviour
 
         if (pendingNetIdsToDestroy.Count > 0)
         {
+            Debug.Log("Pending destroys: " + pendingNetIdsToDestroy.Count);
             lock (pendingNetIdsToDestroy)
             {
                 foreach (var netId in pendingNetIdsToDestroy)
@@ -590,6 +591,11 @@ public class NetworkManager : MonoBehaviour
                 floats.Add(t.netwScale.y);
                 floats.Add(t.netwScale.z);
             }
+        }
+
+        foreach (int id in ids)
+        {
+            Debug.Log("Syncing transform for NetworkId: " + id);
         }
 
         if (sceneSyncs.Count == 0 && ids.Count == 0)
@@ -997,7 +1003,7 @@ public class NetworkManager : MonoBehaviour
 
             MessageType msgType = (MessageType)(byte)payload[0];
 
-            Debug.Log($"Data received from {sender}, length: {length} bytes, message Type: {msgType}");
+            //Debug.Log($"Data received from {sender}, length: {length} bytes, message Type: {msgType}");
             if (msgType == MessageType.Ack)
             {
                 int ackSeqId = (int)payload[1];
@@ -1080,15 +1086,36 @@ public class NetworkManager : MonoBehaviour
                 }
                 break;
             case MessageType.DestroyObject:
-
                 int networkIdToDestroy = (int)rootData[1];
+
                 if (role == NetworkRole.Server || role == NetworkRole.Host)
                 {
-                    BroadcastDestroyObject(networkIdToDestroy);
+                    bool objectExists = networkIdentities.ContainsKey(networkIdToDestroy);
+
+                    bool alreadyPending = false;
+                    lock (pendingNetIdsToDestroy)
+                    {
+                        alreadyPending = pendingNetIdsToDestroy.Contains(networkIdToDestroy);
+                    }
+
+                    if (objectExists && !alreadyPending)
+                    {
+                        BroadcastDestroyObject(networkIdToDestroy);
+                    }
+                    else
+                    {
+                        Debug.Log($"Ignored duplicate destroy request for {networkIdToDestroy}");
+                    }
                 }
                 else if (role == NetworkRole.Client)
                 {
-                    pendingNetIdsToDestroy.Add(networkIdToDestroy);
+                    lock (pendingNetIdsToDestroy)
+                    {
+                        if (!pendingNetIdsToDestroy.Contains(networkIdToDestroy))
+                        {
+                            pendingNetIdsToDestroy.Add(networkIdToDestroy);
+                        }
+                    }
                 }
                 break;
             case MessageType.SceneObjectSync:
@@ -1406,7 +1433,6 @@ public class NetworkManager : MonoBehaviour
         else
         {
             Debug.LogWarning($"NetworkIdentity {networkId} not found to destroy.");
-            pendingNetIdsToDestroy.Remove(networkId);
         }
     }
 
@@ -1540,7 +1566,6 @@ public class NetworkManager : MonoBehaviour
 
                 if (transformsData != null && clientConnections.Count > 0)
                 {
-
                     foreach (var client in clientConnections.Values)
                     {
                         try
@@ -1558,7 +1583,7 @@ public class NetworkManager : MonoBehaviour
             {
                 if (socket.Available == 0)
                 {
-                    Thread.Sleep(1);
+                    Thread.Sleep(3);
                     continue;
                 }
 

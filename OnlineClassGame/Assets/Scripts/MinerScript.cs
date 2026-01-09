@@ -76,6 +76,7 @@ public class MinerScript : MonoBehaviour
                     }
                 }
             }
+            crosshairController.uiText.text = hit.collider.name.Split(' ')[0];
         }
 
         if (crosshairController != null)

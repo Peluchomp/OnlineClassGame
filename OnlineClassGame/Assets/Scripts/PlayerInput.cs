@@ -23,6 +23,7 @@ public class PlayerInput : MonoBehaviour
         PlayerLookInput();
         PlayerMineInput();
         PlayerGrabInput();
+        QuitGame();
     }
 
     private void OnEnable()
@@ -77,5 +78,12 @@ public class PlayerInput : MonoBehaviour
         return _gameControls.Player.Sprint.IsPressed();
     }
 
-    
+    public void QuitGame()
+    {
+        if (_gameControls.UI.Cancel.triggered)
+        {
+            Application.Quit();
+        }
+    }
+
 }

@@ -21,7 +21,7 @@ public class ScoreManager : MonoBehaviour
         NetworkManager.Instance.OnIntValueReceived += UpdateScoreUI;
     }
 
-    private void OnDestroy()
+    private void OnDisable()
     {
         if (NetworkManager.Instance != null)
         {

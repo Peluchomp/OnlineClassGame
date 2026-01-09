@@ -24,18 +24,14 @@ public class CustomerAI : MonoBehaviour
         bool isMoving = agent.velocity.magnitude > 0.1f;
         animator.SetBool("IsWalking", isMoving);
 
-        if (!hasArrived && agent.remainingDistance <= agent.stoppingDistance)
+        if (!hasArrived && agent.remainingDistance <= agent.stoppingDistance + 0.01f)
         {
             Debug.Log("Customer has arrived at destination.");
             hasArrived = true;
             animator.SetTrigger("Arrive");
             animator.SetBool("IsWalking", false);
             OrderManager.Instance.ActivateOrderDisplay();
-        }
-
-        if (agent.remainingDistance > agent.stoppingDistance)
-        {
-            hasArrived = false;
+            GameManager.Instance.isSpawningCustomer = false;
         }
     }
 

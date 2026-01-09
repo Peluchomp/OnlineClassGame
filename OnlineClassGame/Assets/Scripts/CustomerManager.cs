@@ -10,6 +10,7 @@ public class CustomerManager : MonoBehaviour
 
     NetworkIdentity customerActiveInstance;
 
+    bool isCustomerActive = false;
     public static CustomerManager Instance { get; private set; }
 
     private void Awake()
@@ -25,7 +26,9 @@ public class CustomerManager : MonoBehaviour
 
     public void SpawnCustomer()
     {
+
         if (NetworkManager.Instance.role != NetworkRole.Server) return;
+        isCustomerActive = true;
         Debug.Log("Spawning Customer");
         customerActiveInstance = NetworkManager.Instance.ServerSpawnAndBroadcast(Random.Range(2,2),customerSpawn.position,Quaternion.identity);
 
@@ -55,8 +58,9 @@ public class CustomerManager : MonoBehaviour
         CustomerAI customerAI = customerActiveInstance.GetComponent<CustomerAI>();
         customerAI.SetDestination(customerSpawn.position);
 
-        if (NetworkManager.Instance.role == NetworkRole.Server)
+        if (NetworkManager.Instance.role == NetworkRole.Server && isCustomerActive)
         {
+            isCustomerActive = false;
             StartCoroutine(SendNewCustomerAfterDelay(1.5f));
         }
     }

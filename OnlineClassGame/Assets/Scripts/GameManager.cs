@@ -4,6 +4,8 @@ public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
 
+    public bool isSpawningCustomer = false;
+
     private void Awake()
     {
         if (Instance != null && Instance != this)
@@ -23,6 +25,9 @@ public class GameManager : MonoBehaviour
     [ContextMenu("New Customer")]
     public void NewCustomer()
     {
+        if (isSpawningCustomer) return;
+
+        isSpawningCustomer = true;
         Debug.Log("New Customer Triggered");
         CustomerManager.Instance.SendCustomerToLeave();
         MineralManager.Instance.RestoreMinerals();

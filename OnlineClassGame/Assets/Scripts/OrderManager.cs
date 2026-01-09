@@ -160,7 +160,7 @@ public class OrderManager : MonoBehaviour
         timerDuration = duration;
         isTimerRunning = true;
 
-        Debug.Log($"Timer Started. Duration: {duration}");
+       // Debug.Log($"Timer Started. Duration: {duration}");
     }
 
     private void UpdateTimerVisuals()
@@ -225,6 +225,7 @@ public class OrderManager : MonoBehaviour
     private void CheckOrderCompletion()
     {
         if (NetworkManager.Instance.role != NetworkManager.NetworkRole.Server) return;
+        if (GameManager.Instance.isSpawningCustomer) return;
 
         mineralsInZone.RemoveAll(item => item == null);
 
@@ -253,7 +254,6 @@ public class OrderManager : MonoBehaviour
             isTimerRunning = false;
             ScoreManager.Instance.ModifyScore(1);
             GameManager.Instance.NewCustomer();
-
         }
     }
 

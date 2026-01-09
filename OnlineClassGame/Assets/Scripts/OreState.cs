@@ -53,7 +53,6 @@ public class OreState : MonoBehaviour
                         break;
                 }
 
-           
                 NetworkManager.Instance.BroadcastDestroyObject(GetComponent<NetworkIdentity>().networkId);
             }
         }
