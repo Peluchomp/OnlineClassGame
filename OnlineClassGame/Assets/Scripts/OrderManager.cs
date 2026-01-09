@@ -143,7 +143,7 @@ public class OrderManager : MonoBehaviour
     {
         orderDisplayImage.GetComponent<Image>().enabled = true;
         orderDisplayText.alpha = 255;
-        ServerStartTimer(10f);
+        ServerStartTimer(60f);
         sliderVisuals.SetActive(true);
     }
 
@@ -196,7 +196,7 @@ public class OrderManager : MonoBehaviour
 
         ScoreManager.Instance.ModifyScore(-1);
         GameManager.Instance.NewCustomer();
-        ServerStartTimer(10f);
+        ServerStartTimer(60f);
     }
 
     public void StopTimer() 
